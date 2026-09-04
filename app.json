@@ -2,19 +2,13 @@
   "expo": {
     "name": "Freshly Ground Orders",
     "slug": "freshly-ground-orders",
-    "version": "1.0.1",
-    "orientation": "portrait",
+    "version": "2.0.0",
+    "orientation": "default",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "android": {
       "package": "com.freshlyground.orders",
-      "permissions": [
-        "BLUETOOTH",
-        "BLUETOOTH_ADMIN",
-        "BLUETOOTH_CONNECT",
-        "BLUETOOTH_SCAN",
-        "ACCESS_FINE_LOCATION"
-      ]
+      "versionCode": 2
     },
     "owner": "megastockmate",
     "extra": {

@@ -2,6 +2,9 @@ name: Build Freshly Ground APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
@@ -29,5 +32,22 @@ jobs:
       - name: Verify Expo account
         run: eas whoami
 
-      - name: Build Android APK
-        run: eas build --platform android --profile preview --non-interactive --no-wait
+      - name: Build Android APK on EAS
+        run: eas build --platform android --profile preview --non-interactive --wait
+
+      - name: Download latest APK from EAS
+        shell: bash
+        run: |
+          eas build:list --platform android --status finished --limit 1 --json --non-interactive > eas-build.json
+          node -e "const fs=require('fs'); const b=JSON.parse(fs.readFileSync('eas-build.json','utf8'))[0]; if(!b?.artifacts?.buildUrl) process.exit(2); fs.writeFileSync('build-url.txt',b.artifacts.buildUrl);"
+          BUILD_URL=$(cat build-url.txt)
+          curl -L --fail "$BUILD_URL" -o FreshlyGroundOrders-v2.0.1.apk
+          test -s FreshlyGroundOrders-v2.0.1.apk
+
+      - name: Upload APK for direct download
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreshlyGroundOrders-v2.0.1-APK
+          path: FreshlyGroundOrders-v2.0.1.apk
+          if-no-files-found: error
+          retention-days: 30

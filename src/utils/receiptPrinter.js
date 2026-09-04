@@ -91,26 +91,40 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   return lines.join('\n');
 }
 
+function normalizeUsbDevice(device, index) {
+  const vendorId = Number(device?.vendorId ?? device?.vendor_id);
+  const productId = Number(device?.productId ?? device?.product_id);
+  if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return null;
+  return {
+    id: `${vendorId}-${productId}-${index}`,
+    name: device?.deviceName || device?.device_name || 'USB Thermal Printer',
+    vendorId,
+    productId,
+  };
+}
+
 export async function listUsbPrinters() {
   if (Platform.OS !== 'android') return [];
   const USBPrinter = getUsbPrinter();
   if (!USBPrinter) throw new Error('USB printer module is not available in this build.');
+
   await USBPrinter.init();
   const devices = await USBPrinter.getDeviceList();
-  return (devices || []).map((device, index) => ({
-    id: `${device.vendorId || device.vendor_id || 'v'}-${device.productId || device.product_id || 'p'}-${index}`,
-    name: device.deviceName || device.device_name || 'USB Thermal Printer',
-    vendorId: String(device.vendorId ?? device.vendor_id ?? ''),
-    productId: String(device.productId ?? device.product_id ?? ''),
-  })).filter((device) => device.vendorId && device.productId);
+  return (devices || []).map(normalizeUsbDevice).filter(Boolean);
 }
 
 async function connect(printer) {
   const USBPrinter = getUsbPrinter();
   if (!USBPrinter) throw new Error('USB printer module is not available in this build.');
-  if (!printer?.vendorId || !printer?.productId) throw new Error('No USB printer selected.');
+
+  const vendorId = Number(printer?.vendorId);
+  const productId = Number(printer?.productId);
+  if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) {
+    throw new Error('The selected USB printer has invalid device IDs. Please detect and select it again.');
+  }
+
   await USBPrinter.init();
-  await USBPrinter.connectPrinter(String(printer.vendorId), String(printer.productId));
+  await USBPrinter.connectPrinter(vendorId, productId);
   return USBPrinter;
 }
 
@@ -118,25 +132,35 @@ export async function printOrderSlip(order, settings, options = {}) {
   const printer = settings?.printer;
   const receipt = settings?.receipt || {};
   if (!printer) {
-    Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, then select it in Settings.');
+    Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.');
     return { printed: false, reason: 'No printer selected' };
   }
+
   try {
     const USBPrinter = await connect(printer);
     const text = buildSlipText(order, receipt, options);
-    await USBPrinter.printBill(text, {
+    if (typeof USBPrinter.printBill !== 'function') {
+      throw new Error('USB print function is unavailable in this build.');
+    }
+    await Promise.resolve(USBPrinter.printBill(text, {
       cut: receipt.autoCut !== false,
       tailingLine: true,
       encoding: 'UTF-8',
-    });
+    }));
     return { printed: true };
   } catch (error) {
+    console.warn('USB print failed:', error?.message || error);
     Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.');
     return { printed: false, reason: error?.message || 'Unknown printer error' };
   }
 }
 
 export async function printTestSlip(settings) {
+  if (!settings?.printer) {
+    Alert.alert('USB printer not selected', 'Detect and select the POS-8360 first.');
+    return { printed: false, reason: 'No printer selected' };
+  }
+
   const now = new Date();
   const order = {
     number: 'TEST',

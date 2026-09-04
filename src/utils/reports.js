@@ -1,7 +1,3 @@
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import { File, Paths } from 'expo-file-system';
-import * as DocumentPicker from 'expo-document-picker';
 import { formatMoney } from './receiptPrinter';
 
 export function localDateKey(value) {
@@ -39,8 +35,9 @@ export function buildSalesSummary(orders = []) {
       const key = item.name;
       const current = productMap.get(key) || { name: item.name, qty: 0, sales: 0 };
       const modifierValue = (item.selectedModifiers || []).reduce((s, m) => s + Number(m.price || 0), 0);
+      const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
       current.qty += Number(item.qty || 0);
-      current.sales += Number(item.qty || 0) * (Number(item.unitPrice || 0) + modifierValue);
+      current.sales += Number(item.qty || 0) * (unitPrice + modifierValue);
       productMap.set(key, current);
     });
   });
@@ -84,6 +81,8 @@ export function buildDailySalesHtml(date, orders = []) {
 }
 
 export async function shareDailySales(date, orders) {
+  const Print = require('expo-print');
+  const Sharing = require('expo-sharing');
   const { uri } = await Print.printToFileAsync({ html: buildDailySalesHtml(date, orders) });
   const available = await Sharing.isAvailableAsync();
   if (!available) throw new Error('Sharing is not available on this device.');
@@ -91,6 +90,8 @@ export async function shareDailySales(date, orders) {
 }
 
 export async function shareBackup(payload) {
+  const Sharing = require('expo-sharing');
+  const { File, Paths } = require('expo-file-system');
   const file = new File(Paths.cache, `freshly-ground-backup-${Date.now()}.json`);
   file.create({ overwrite: true, intermediates: true });
   file.write(payload);
@@ -100,6 +101,8 @@ export async function shareBackup(payload) {
 }
 
 export async function pickBackup() {
+  const DocumentPicker = require('expo-document-picker');
+  const { File } = require('expo-file-system');
   const result = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true, multiple: false });
   if (result.canceled || !result.assets?.[0]) return null;
   const file = new File(result.assets[0].uri);

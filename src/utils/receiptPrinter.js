@@ -1,14 +1,26 @@
 import { Alert, Platform } from 'react-native';
 
-let USBPrinter = null;
-let COMMANDS = null;
-try {
-  const printerModule = require('@haroldtran/react-native-thermal-printer');
-  USBPrinter = printerModule.USBPrinter;
-  COMMANDS = printerModule.COMMANDS;
-} catch {
-  USBPrinter = null;
-  COMMANDS = null;
+let cachedPrinterModule;
+
+function getPrinterModule() {
+  if (cachedPrinterModule !== undefined) return cachedPrinterModule;
+  try {
+    cachedPrinterModule = require('@haroldtran/react-native-thermal-printer');
+  } catch (error) {
+    console.warn('Thermal printer module could not be loaded:', error?.message || error);
+    cachedPrinterModule = null;
+  }
+  return cachedPrinterModule;
+}
+
+function getUsbPrinter() {
+  const mod = getPrinterModule();
+  return mod?.USBPrinter || null;
+}
+
+function getCommands() {
+  const mod = getPrinterModule();
+  return mod?.COMMANDS || null;
 }
 
 export function formatMoney(value) {
@@ -16,18 +28,21 @@ export function formatMoney(value) {
 }
 
 function hr() {
-  return COMMANDS?.HORIZONTAL_LINE?.HR_80MM || '------------------------------------------------';
+  const commands = getCommands();
+  return commands?.HORIZONTAL_LINE?.HR_80MM || '------------------------------------------------';
 }
 
 function center(text) {
-  const c = COMMANDS?.TEXT_FORMAT?.TXT_ALIGN_CT || '';
-  const l = COMMANDS?.TEXT_FORMAT?.TXT_ALIGN_LT || '';
-  return `${c}${text}${l}`;
+  const commands = getCommands();
+  const ct = commands?.TEXT_FORMAT?.TXT_ALIGN_CT || '';
+  const lt = commands?.TEXT_FORMAT?.TXT_ALIGN_LT || '';
+  return `${ct}${text}${lt}`;
 }
 
 function bold(text) {
-  const on = COMMANDS?.TEXT_FORMAT?.TXT_BOLD_ON || '';
-  const off = COMMANDS?.TEXT_FORMAT?.TXT_BOLD_OFF || '';
+  const commands = getCommands();
+  const on = commands?.TEXT_FORMAT?.TXT_BOLD_ON || '';
+  const off = commands?.TEXT_FORMAT?.TXT_BOLD_OFF || '';
   return `${on}${text}${off}`;
 }
 
@@ -51,7 +66,8 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   lines.push('');
 
   (order.items || []).forEach((item) => {
-    const price = receipt.showPrices === false ? '' : `  ${formatMoney(item.qty * item.unitPrice)}`;
+    const unit = Number(item.unitPrice ?? item.price ?? 0);
+    const price = receipt.showPrices === false ? '' : `  ${formatMoney(item.qty * unit)}`;
     lines.push(bold(`${item.qty} x ${item.name}${price}`));
     (item.selectedModifiers || []).forEach((mod) => {
       const modPrice = receipt.showPrices === false ? '' : ` +${formatMoney(mod.price)}`;
@@ -76,11 +92,13 @@ export function buildSlipText(order, receipt = {}, options = {}) {
 }
 
 export async function listUsbPrinters() {
-  if (Platform.OS !== 'android' || !USBPrinter) return [];
+  if (Platform.OS !== 'android') return [];
+  const USBPrinter = getUsbPrinter();
+  if (!USBPrinter) throw new Error('USB printer module is not available in this build.');
   await USBPrinter.init();
   const devices = await USBPrinter.getDeviceList();
   return (devices || []).map((device, index) => ({
-    id: `${device.vendorId || 'v'}-${device.productId || 'p'}-${index}`,
+    id: `${device.vendorId || device.vendor_id || 'v'}-${device.productId || device.product_id || 'p'}-${index}`,
     name: device.deviceName || device.device_name || 'USB Thermal Printer',
     vendorId: String(device.vendorId ?? device.vendor_id ?? ''),
     productId: String(device.productId ?? device.product_id ?? ''),
@@ -88,10 +106,12 @@ export async function listUsbPrinters() {
 }
 
 async function connect(printer) {
-  if (!USBPrinter) throw new Error('USB printer library is not available in this build.');
+  const USBPrinter = getUsbPrinter();
+  if (!USBPrinter) throw new Error('USB printer module is not available in this build.');
   if (!printer?.vendorId || !printer?.productId) throw new Error('No USB printer selected.');
   await USBPrinter.init();
   await USBPrinter.connectPrinter(String(printer.vendorId), String(printer.productId));
+  return USBPrinter;
 }
 
 export async function printOrderSlip(order, settings, options = {}) {
@@ -102,7 +122,7 @@ export async function printOrderSlip(order, settings, options = {}) {
     return { printed: false, reason: 'No printer selected' };
   }
   try {
-    await connect(printer);
+    const USBPrinter = await connect(printer);
     const text = buildSlipText(order, receipt, options);
     await USBPrinter.printBill(text, {
       cut: receipt.autoCut !== false,
@@ -112,7 +132,7 @@ export async function printOrderSlip(order, settings, options = {}) {
     return { printed: true };
   } catch (error) {
     Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.');
-    return { printed: false, reason: error?.message || 'Unknown print error' };
+    return { printed: false, reason: error?.message || 'Unknown printer error' };
   }
 }
 

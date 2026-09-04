@@ -1,0 +1,43 @@
+FRESHLY GROUND ORDERS - GITHUB APK BUILD
+========================================
+
+1) Create a new GitHub repository called:
+   FreshlyGroundOrders
+
+2) In Command Prompt, from this project folder, run:
+
+   git init
+   git add .
+   git commit -m "Freshly Ground Orders Android app"
+   git branch -M main
+   git remote add origin https://github.com/YOUR-GITHUB-USERNAME/FreshlyGroundOrders.git
+   git push -u origin main
+
+3) Create an Expo access token:
+   Expo account -> Settings -> Access Tokens -> Create Token
+
+4) In GitHub open:
+   Repository -> Settings -> Secrets and variables -> Actions
+   New repository secret
+
+   Name: EXPO_TOKEN
+   Value: paste your Expo access token
+
+5) Open GitHub:
+   Actions -> Build Android APK -> Run workflow
+
+6) The GitHub runner will trigger the EAS preview build.
+   The preview profile is configured for android.buildType = apk.
+
+IMPORTANT
+---------
+The Expo project is owned by: megastockmate
+The Expo project slug is: freshly-ground-orders
+
+If GitHub Actions reports that the EAS project is not linked, run this ONCE
+from your Windows project folder while logged into Expo:
+
+   npx eas-cli@latest project:info
+
+If app.json does not contain extra.eas.projectId, copy the project ID shown
+by that command into app.json before pushing again.

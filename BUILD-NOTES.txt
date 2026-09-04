@@ -1,0 +1,13 @@
+Freshly Ground Orders - build fix v1.0.2
+
+This version removes the unnecessary babel.config.js that caused EAS Metro bundling to fail with:
+Cannot find module 'babel-preset-expo'
+
+Recommended clean build steps on Windows:
+1. Extract this ZIP into a NEW folder.
+2. Open Command Prompt in that folder.
+3. Run: npm install
+4. Run: npx expo-doctor
+5. Run: eas build -p android --profile preview --clear-cache
+
+The preview profile is configured to produce an APK.

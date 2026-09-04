@@ -1,116 +1,139 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { defaultMenu } from './src/data/menu';
+import { defaultMenu, normalizeMenu } from './src/data/menu';
+import { defaultSettings, mergeSettings } from './src/data/settings';
 import { NewOrderScreen } from './src/screens/NewOrderScreen';
 import { OrdersScreen } from './src/screens/OrdersScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { STORAGE_KEYS, loadJson, saveJson } from './src/utils/storage';
+import { localDateKey } from './src/utils/reports';
+import { theme } from './src/theme';
 
-const STORAGE_KEYS = {
-  menu: 'FGE_MENU_V1',
-  orders: 'FGE_ORDERS_V1',
-  printer: 'FGE_PRINTER_V1',
-};
+const LEGACY_KEYS = { menu: 'FGE_MENU_V1', orders: 'FGE_ORDERS_V1', printer: 'FGE_PRINTER_V1' };
 
 export default function App() {
+  return <SafeAreaProvider><AppShell /></SafeAreaProvider>;
+}
+
+function AppShell() {
   const [activeTab, setActiveTab] = useState('new');
   const [menu, setMenu] = useState(defaultMenu);
   const [orders, setOrders] = useState([]);
-  const [printer, setPrinter] = useState(null);
+  const [settings, setSettings] = useState(defaultSettings);
   const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     try {
-      const [savedMenu, savedOrders, savedPrinter] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.menu),
-        AsyncStorage.getItem(STORAGE_KEYS.orders),
-        AsyncStorage.getItem(STORAGE_KEYS.printer),
+      let savedMenu = await loadJson(STORAGE_KEYS.menu, null);
+      let savedOrders = await loadJson(STORAGE_KEYS.orders, null);
+      let savedSettings = await loadJson(STORAGE_KEYS.settings, null);
+
+      if (!savedMenu) savedMenu = await loadJson(LEGACY_KEYS.menu, null);
+      if (!savedOrders) savedOrders = await loadJson(LEGACY_KEYS.orders, null);
+      if (!savedSettings) {
+        const legacyPrinter = await loadJson(LEGACY_KEYS.printer, null);
+        savedSettings = legacyPrinter ? { ...defaultSettings, printer: null } : defaultSettings;
+      }
+
+      const normalizedMenu = normalizeMenu(savedMenu || defaultMenu);
+      const normalizedOrders = (savedOrders || []).map((order) => ({
+        ...order,
+        dayKey: order.dayKey || localDateKey(order.createdAt || Date.now()),
+        items: (order.items || []).map((item) => ({
+          ...item,
+          unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+          selectedModifiers: item.selectedModifiers || [],
+        })),
+      }));
+      const mergedSettings = mergeSettings(savedSettings || defaultSettings);
+
+      setMenu(normalizedMenu);
+      setOrders(normalizedOrders);
+      setSettings(mergedSettings);
+      await Promise.all([
+        saveJson(STORAGE_KEYS.menu, normalizedMenu),
+        saveJson(STORAGE_KEYS.orders, normalizedOrders),
+        saveJson(STORAGE_KEYS.settings, mergedSettings),
       ]);
-      if (savedMenu) setMenu(JSON.parse(savedMenu));
-      if (savedOrders) setOrders(JSON.parse(savedOrders));
-      if (savedPrinter) setPrinter(JSON.parse(savedPrinter));
     } catch (error) {
       Alert.alert('Load error', 'The app could not load saved data.');
-    } finally {
-      setReady(true);
-    }
+    } finally { setReady(true); }
   }
 
   async function saveMenu(nextMenu) {
-    setMenu(nextMenu);
-    await AsyncStorage.setItem(STORAGE_KEYS.menu, JSON.stringify(nextMenu));
+    const normalized = normalizeMenu(nextMenu);
+    setMenu(normalized);
+    await saveJson(STORAGE_KEYS.menu, normalized);
   }
 
-  async function savePrinter(nextPrinter) {
-    setPrinter(nextPrinter);
-    await AsyncStorage.setItem(STORAGE_KEYS.printer, JSON.stringify(nextPrinter));
+  async function saveSettings(next) {
+    const merged = mergeSettings(next);
+    setSettings(merged);
+    await saveJson(STORAGE_KEYS.settings, merged);
   }
 
   async function addOrder(order) {
-    const nextOrders = [order, ...orders].slice(0, 500);
-    setOrders(nextOrders);
-    await AsyncStorage.setItem(STORAGE_KEYS.orders, JSON.stringify(nextOrders));
+    const next = [order, ...orders];
+    setOrders(next);
+    await saveJson(STORAGE_KEYS.orders, next);
   }
 
-  async function updateOrderStatus(orderId, status) {
-    const nextOrders = orders.map((order) =>
-      order.id === orderId ? { ...order, status } : order
-    );
+  function getNextOrderNumber(now = new Date()) {
+    const key = localDateKey(now);
+    const todayCount = orders.filter((o) => (o.dayKey || localDateKey(o.createdAt)) === key).length;
+    return String(todayCount + 1).padStart(3, '0');
+  }
+
+  async function restoreBackup(payload) {
+    const nextMenu = normalizeMenu(payload.menu || defaultMenu);
+    const nextOrders = payload.orders || [];
+    const nextSettings = mergeSettings(payload.settings || defaultSettings);
+    setMenu(nextMenu);
     setOrders(nextOrders);
-    await AsyncStorage.setItem(STORAGE_KEYS.orders, JSON.stringify(nextOrders));
+    setSettings(nextSettings);
+    await Promise.all([
+      saveJson(STORAGE_KEYS.menu, nextMenu),
+      saveJson(STORAGE_KEYS.orders, nextOrders),
+      saveJson(STORAGE_KEYS.settings, nextSettings),
+    ]);
+    Alert.alert('Backup restored', 'Menu, settings and sales history have been restored.');
   }
 
   const content = useMemo(() => {
-    if (!ready) {
-      return <Text style={styles.loading}>Loading Freshly Ground Orders...</Text>;
-    }
-    if (activeTab === 'orders') {
-      return <OrdersScreen orders={orders} printer={printer} onStatusChange={updateOrderStatus} />;
-    }
-    if (activeTab === 'settings') {
-      return <SettingsScreen menu={menu} onSaveMenu={saveMenu} printer={printer} onSavePrinter={savePrinter} />;
-    }
-    return <NewOrderScreen menu={menu} printer={printer} onOrderSaved={addOrder} />;
-  }, [activeTab, menu, orders, printer, ready]);
+    if (!ready) return <View style={styles.loadingWrap}><Text style={styles.loading}>Loading Freshly Ground…</Text></View>;
+    if (activeTab === 'sales') return <OrdersScreen orders={orders} settings={settings} />;
+    if (activeTab === 'settings') return <SettingsScreen menu={menu} onSaveMenu={saveMenu} settings={settings} onSaveSettings={saveSettings} orders={orders} onRestoreBackup={restoreBackup} />;
+    return <NewOrderScreen menu={menu} settings={settings} onOrderSaved={addOrder} getNextOrderNumber={getNextOrderNumber} />;
+  }, [activeTab, menu, orders, settings, ready]);
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-      <View style={styles.header}>
-        <Text style={styles.brand}>Freshly Ground Express</Text>
-        <Text style={styles.subtitle}>Order Taking & Thermal Slips</Text>
-      </View>
-      <View style={styles.body}>{content}</View>
-      <View style={styles.tabs}>
-        <TabButton active={activeTab === 'new'} label="New Order" onPress={() => setActiveTab('new')} />
-        <TabButton active={activeTab === 'orders'} label="Orders" onPress={() => setActiveTab('orders')} />
-        <TabButton active={activeTab === 'settings'} label="Settings" onPress={() => setActiveTab('settings')} />
-      </View>
-    </SafeAreaView>
-  );
+  return <SafeAreaView style={styles.safeArea} edges={['top','bottom']}>
+    <StatusBar style="light" backgroundColor={theme.colors.espresso} />
+    <View style={styles.header}>
+      <View style={styles.logoMark}><Text style={styles.logoFG}>FG</Text></View>
+      <View style={styles.brandWrap}><Text style={styles.brandTop}>FRESHLY GROUND</Text><Text style={styles.brandBottom}>EXPRESS</Text></View>
+      <View style={styles.usbBadge}><Text style={styles.usbBadgeText}>{settings.printer ? 'USB READY' : 'USB SETUP'}</Text></View>
+    </View>
+    <View style={styles.body}>{content}</View>
+    <View style={styles.tabs}>
+      <TabButton icon="＋" active={activeTab === 'new'} label="New Order" onPress={() => setActiveTab('new')} />
+      <TabButton icon="▤" active={activeTab === 'sales'} label="Sales" onPress={() => setActiveTab('sales')} />
+      <TabButton icon="⚙" active={activeTab === 'settings'} label="Settings" onPress={() => setActiveTab('settings')} />
+    </View>
+  </SafeAreaView>;
 }
 
-function TabButton({ active, label, onPress }) {
-  return (
-    <Text onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-      {label}
-    </Text>
-  );
+function TabButton({ active, icon, label, onPress }) {
+  return <TouchableOpacity onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
+    <Text style={[styles.tabIcon, active && styles.tabTextActive]}>{icon}</Text><Text style={[styles.tabLabel, active && styles.tabTextActive]}>{label}</Text>
+  </TouchableOpacity>;
 }
 
+const c = theme.colors;
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#111' },
-  header: { backgroundColor: '#111', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 },
-  brand: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  subtitle: { color: '#e53b32', fontSize: 12, marginTop: 2, fontWeight: '700' },
-  body: { flex: 1, backgroundColor: '#f5f2ea' },
-  loading: { padding: 20, fontSize: 16 },
-  tabs: { flexDirection: 'row', backgroundColor: '#111', padding: 10, gap: 8 },
-  tabButton: { flex: 1, color: '#fff', textAlign: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: '#333', fontWeight: '700' },
-  tabButtonActive: { backgroundColor: '#e53b32' },
+  safeArea:{flex:1,backgroundColor:c.espresso},header:{backgroundColor:c.espresso,paddingHorizontal:14,paddingVertical:10,flexDirection:'row',alignItems:'center',gap:10},logoMark:{width:42,height:42,borderRadius:21,borderWidth:2,borderColor:'#fff',alignItems:'center',justifyContent:'center'},logoFG:{color:'#fff',fontWeight:'900',fontSize:16},brandWrap:{flex:1},brandTop:{color:'#fff',fontSize:17,fontWeight:'900',letterSpacing:.5},brandBottom:{color:'#D75A50',fontSize:12,fontWeight:'900',letterSpacing:3},usbBadge:{backgroundColor:c.green,paddingHorizontal:8,paddingVertical:5,borderRadius:999},usbBadgeText:{color:'#fff',fontSize:9,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},loadingWrap:{flex:1,justifyContent:'center',alignItems:'center'},loading:{color:c.ink,fontWeight:'800'},tabs:{flexDirection:'row',backgroundColor:c.espresso,paddingHorizontal:8,paddingTop:7,paddingBottom:5,gap:7},tabButton:{flex:1,alignItems:'center',paddingVertical:6,borderRadius:11},tabButtonActive:{backgroundColor:c.green},tabIcon:{color:'#CFC4B9',fontSize:19,fontWeight:'900'},tabLabel:{color:'#CFC4B9',fontSize:11,fontWeight:'800',marginTop:1},tabTextActive:{color:'#fff'},
 });

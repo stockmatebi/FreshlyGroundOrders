@@ -38,7 +38,6 @@ function AppShell() {
       let savedMenu = await loadJson(STORAGE_KEYS.menu, null);
       let savedOrders = await loadJson(STORAGE_KEYS.orders, null);
       let savedSettings = await loadJson(STORAGE_KEYS.settings, null);
-
       if (!savedMenu) savedMenu = await loadJson(LEGACY_KEYS.menu, null);
       if (!savedOrders) savedOrders = await loadJson(LEGACY_KEYS.orders, null);
       if (!savedSettings) savedSettings = defaultSettings;
@@ -54,7 +53,6 @@ function AppShell() {
         })),
       }));
       const mergedSettings = mergeSettings(savedSettings || defaultSettings);
-
       setMenu(normalizedMenu);
       setOrders(normalizedOrders);
       setSettings(mergedSettings);
@@ -157,15 +155,15 @@ function TabButton({ active, icon, label, onPress }) {
 const c = theme.colors;
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: c.espresso },
-  header: { backgroundColor: c.espresso, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoMark: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.green, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  cupTop: { width: 22, height: 3, borderRadius: 2, backgroundColor: '#fff', position: 'absolute', top: 14, left: 9 },
-  cupBody: { width: 22, height: 14, borderBottomLeftRadius: 7, borderBottomRightRadius: 7, backgroundColor: '#fff', position: 'absolute', top: 17, left: 9 },
-  cupHandle: { width: 8, height: 9, borderWidth: 3, borderColor: '#fff', borderLeftWidth: 0, borderRadius: 5, position: 'absolute', top: 19, right: 5 },
-  brandWrap: { flex: 1 },
-  brandTop: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 },
-  brandBottom: { color: '#D75A50', fontSize: 12, fontWeight: '900', letterSpacing: 3 },
-  usbBadge: { backgroundColor: c.green, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999 },
+  header: { backgroundColor: c.espresso, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 82 },
+  logoMark: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.green, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  cupTop: { width: 22, height: 3, borderRadius: 2, backgroundColor: '#fff', position: 'absolute', top: 15, left: 10 },
+  cupBody: { width: 22, height: 14, borderBottomLeftRadius: 7, borderBottomRightRadius: 7, backgroundColor: '#fff', position: 'absolute', top: 18, left: 10 },
+  cupHandle: { width: 8, height: 9, borderWidth: 3, borderColor: '#fff', borderLeftWidth: 0, borderRadius: 5, position: 'absolute', top: 20, right: 5 },
+  brandWrap: { flex: 1, minHeight: 48, justifyContent: 'center' },
+  brandTop: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5, lineHeight: 22 },
+  brandBottom: { color: '#D75A50', fontSize: 12, fontWeight: '900', letterSpacing: 3, lineHeight: 18 },
+  usbBadge: { backgroundColor: c.green, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, flexShrink: 0 },
   usbBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
   body: { flex: 1, backgroundColor: c.bg },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },

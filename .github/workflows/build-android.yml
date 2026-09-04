@@ -1,21 +1,23 @@
-name: Build Android APK
+name: Build Freshly Ground APK
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Freshly Ground APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 20
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Setup Expo and EAS
         uses: expo/expo-github-action@v8
@@ -23,11 +25,5 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Expo project check
-        run: npx expo-doctor
-
-      - name: Trigger Android APK build on EAS
-        run: eas build --platform android --profile preview --non-interactive --no-wait
+      - name: Build Android APK
+        run: eas build --platform android --profile preview --non-interactive

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { defaultMenu, normalizeMenu } from './src/data/menu';
@@ -8,6 +7,7 @@ import { defaultSettings, mergeSettings } from './src/data/settings';
 import { NewOrderScreen } from './src/screens/NewOrderScreen';
 import { OrdersScreen } from './src/screens/OrdersScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { AppErrorBoundary } from './src/components/AppErrorBoundary';
 import { STORAGE_KEYS, loadJson, saveJson } from './src/utils/storage';
 import { localDateKey } from './src/utils/reports';
 import { theme } from './src/theme';
@@ -15,7 +15,13 @@ import { theme } from './src/theme';
 const LEGACY_KEYS = { menu: 'FGE_MENU_V1', orders: 'FGE_ORDERS_V1', printer: 'FGE_PRINTER_V1' };
 
 export default function App() {
-  return <SafeAreaProvider><AppShell /></SafeAreaProvider>;
+  return (
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <AppShell />
+      </SafeAreaProvider>
+    </AppErrorBoundary>
+  );
 }
 
 function AppShell() {
@@ -35,13 +41,10 @@ function AppShell() {
 
       if (!savedMenu) savedMenu = await loadJson(LEGACY_KEYS.menu, null);
       if (!savedOrders) savedOrders = await loadJson(LEGACY_KEYS.orders, null);
-      if (!savedSettings) {
-        const legacyPrinter = await loadJson(LEGACY_KEYS.printer, null);
-        savedSettings = legacyPrinter ? { ...defaultSettings, printer: null } : defaultSettings;
-      }
+      if (!savedSettings) savedSettings = defaultSettings;
 
       const normalizedMenu = normalizeMenu(savedMenu || defaultMenu);
-      const normalizedOrders = (savedOrders || []).map((order) => ({
+      const normalizedOrders = (Array.isArray(savedOrders) ? savedOrders : []).map((order) => ({
         ...order,
         dayKey: order.dayKey || localDateKey(order.createdAt || Date.now()),
         items: (order.items || []).map((item) => ({
@@ -61,8 +64,14 @@ function AppShell() {
         saveJson(STORAGE_KEYS.settings, mergedSettings),
       ]);
     } catch (error) {
-      Alert.alert('Load error', 'The app could not load saved data.');
-    } finally { setReady(true); }
+      console.error('Startup load error', error);
+      Alert.alert('Load error', 'Saved data could not be loaded. The app will continue with default settings.');
+      setMenu(defaultMenu);
+      setOrders([]);
+      setSettings(defaultSettings);
+    } finally {
+      setReady(true);
+    }
   }
 
   async function saveMenu(nextMenu) {
@@ -85,13 +94,13 @@ function AppShell() {
 
   function getNextOrderNumber(now = new Date()) {
     const key = localDateKey(now);
-    const todayCount = orders.filter((o) => (o.dayKey || localDateKey(o.createdAt)) === key).length;
+    const todayCount = orders.filter((o) => (o.dayKey || localDateKey(o.createdAt || now)) === key).length;
     return String(todayCount + 1).padStart(3, '0');
   }
 
   async function restoreBackup(payload) {
     const nextMenu = normalizeMenu(payload.menu || defaultMenu);
-    const nextOrders = payload.orders || [];
+    const nextOrders = Array.isArray(payload.orders) ? payload.orders : [];
     const nextSettings = mergeSettings(payload.settings || defaultSettings);
     setMenu(nextMenu);
     setOrders(nextOrders);
@@ -111,29 +120,60 @@ function AppShell() {
     return <NewOrderScreen menu={menu} settings={settings} onOrderSaved={addOrder} getNextOrderNumber={getNextOrderNumber} />;
   }, [activeTab, menu, orders, settings, ready]);
 
-  return <SafeAreaView style={styles.safeArea} edges={['top','bottom']}>
-    <StatusBar style="light" backgroundColor={theme.colors.espresso} />
-    <View style={styles.header}>
-      <View style={styles.logoMark}><Text style={styles.logoFG}>FG</Text></View>
-      <View style={styles.brandWrap}><Text style={styles.brandTop}>FRESHLY GROUND</Text><Text style={styles.brandBottom}>EXPRESS</Text></View>
-      <View style={styles.usbBadge}><Text style={styles.usbBadgeText}>{settings.printer ? 'USB READY' : 'USB SETUP'}</Text></View>
-    </View>
-    <View style={styles.body}>{content}</View>
-    <View style={styles.tabs}>
-      <TabButton icon="＋" active={activeTab === 'new'} label="New Order" onPress={() => setActiveTab('new')} />
-      <TabButton icon="▤" active={activeTab === 'sales'} label="Sales" onPress={() => setActiveTab('sales')} />
-      <TabButton icon="⚙" active={activeTab === 'settings'} label="Settings" onPress={() => setActiveTab('settings')} />
-    </View>
-  </SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <StatusBar style="light" backgroundColor={theme.colors.espresso} />
+      <View style={styles.header}>
+        <View style={styles.logoMark}>
+          <View style={styles.cupTop} />
+          <View style={styles.cupBody} />
+          <View style={styles.cupHandle} />
+        </View>
+        <View style={styles.brandWrap}>
+          <Text style={styles.brandTop}>FRESHLY GROUND</Text>
+          <Text style={styles.brandBottom}>EXPRESS</Text>
+        </View>
+        <View style={styles.usbBadge}><Text style={styles.usbBadgeText}>{settings.printer ? 'USB READY' : 'USB SETUP'}</Text></View>
+      </View>
+      <View style={styles.body}>{content}</View>
+      <View style={styles.tabs}>
+        <TabButton icon="＋" active={activeTab === 'new'} label="New Order" onPress={() => setActiveTab('new')} />
+        <TabButton icon="▤" active={activeTab === 'sales'} label="Sales" onPress={() => setActiveTab('sales')} />
+        <TabButton icon="⚙" active={activeTab === 'settings'} label="Settings" onPress={() => setActiveTab('settings')} />
+      </View>
+    </SafeAreaView>
+  );
 }
 
 function TabButton({ active, icon, label, onPress }) {
-  return <TouchableOpacity onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-    <Text style={[styles.tabIcon, active && styles.tabTextActive]}>{icon}</Text><Text style={[styles.tabLabel, active && styles.tabTextActive]}>{label}</Text>
-  </TouchableOpacity>;
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
+      <Text style={[styles.tabIcon, active && styles.tabTextActive]}>{icon}</Text>
+      <Text style={[styles.tabLabel, active && styles.tabTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
 }
 
 const c = theme.colors;
 const styles = StyleSheet.create({
-  safeArea:{flex:1,backgroundColor:c.espresso},header:{backgroundColor:c.espresso,paddingHorizontal:14,paddingVertical:10,flexDirection:'row',alignItems:'center',gap:10},logoMark:{width:42,height:42,borderRadius:21,borderWidth:2,borderColor:'#fff',alignItems:'center',justifyContent:'center'},logoFG:{color:'#fff',fontWeight:'900',fontSize:16},brandWrap:{flex:1},brandTop:{color:'#fff',fontSize:17,fontWeight:'900',letterSpacing:.5},brandBottom:{color:'#D75A50',fontSize:12,fontWeight:'900',letterSpacing:3},usbBadge:{backgroundColor:c.green,paddingHorizontal:8,paddingVertical:5,borderRadius:999},usbBadgeText:{color:'#fff',fontSize:9,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},loadingWrap:{flex:1,justifyContent:'center',alignItems:'center'},loading:{color:c.ink,fontWeight:'800'},tabs:{flexDirection:'row',backgroundColor:c.espresso,paddingHorizontal:8,paddingTop:7,paddingBottom:5,gap:7},tabButton:{flex:1,alignItems:'center',paddingVertical:6,borderRadius:11},tabButtonActive:{backgroundColor:c.green},tabIcon:{color:'#CFC4B9',fontSize:19,fontWeight:'900'},tabLabel:{color:'#CFC4B9',fontSize:11,fontWeight:'800',marginTop:1},tabTextActive:{color:'#fff'},
+  safeArea: { flex: 1, backgroundColor: c.espresso },
+  header: { backgroundColor: c.espresso, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logoMark: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.green, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  cupTop: { width: 22, height: 3, borderRadius: 2, backgroundColor: '#fff', position: 'absolute', top: 14, left: 9 },
+  cupBody: { width: 22, height: 14, borderBottomLeftRadius: 7, borderBottomRightRadius: 7, backgroundColor: '#fff', position: 'absolute', top: 17, left: 9 },
+  cupHandle: { width: 8, height: 9, borderWidth: 3, borderColor: '#fff', borderLeftWidth: 0, borderRadius: 5, position: 'absolute', top: 19, right: 5 },
+  brandWrap: { flex: 1 },
+  brandTop: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 0.5 },
+  brandBottom: { color: '#D75A50', fontSize: 12, fontWeight: '900', letterSpacing: 3 },
+  usbBadge: { backgroundColor: c.green, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999 },
+  usbBadgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  body: { flex: 1, backgroundColor: c.bg },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loading: { color: c.ink, fontWeight: '800' },
+  tabs: { flexDirection: 'row', backgroundColor: c.espresso, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 5, gap: 7 },
+  tabButton: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 11 },
+  tabButtonActive: { backgroundColor: c.green },
+  tabIcon: { color: '#CFC4B9', fontSize: 19, fontWeight: '900' },
+  tabLabel: { color: '#CFC4B9', fontSize: 11, fontWeight: '800', marginTop: 1 },
+  tabTextActive: { color: '#fff' },
 });

@@ -64,28 +64,14 @@ export function buildSlipText(order, receipt = {}, options = {}) {
 export function barcodeValue(order, receipt = {}) {
   const prefix = String(receipt.barcodePrefix || '31010001').replace(/\D/g, '') || '31010001';
   const amount = Number(order?.total || 0).toFixed(2);
-  return { prefix, amount, display: `${prefix}  ${amount}` };
+  return { prefix, amount };
 }
 
 function buildEscPosCode128(data) {
   const GS = '\x1d';
   const ESC = '\x1b';
-  return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(data.length)}${data}\n${ESC}a\x00`;
-}
-
-function buildIqRetailStep1Barcode(prefix) {
-  // Scan 1: enter stock code and press Enter. The cashier waits for IQ Retail
-  // to finish loading the line before scanning step 2. This avoids IQ dropping
-  // keystrokes while the stock line is still being created.
-  return buildEscPosCode128(`{B${prefix}{A\r`);
-}
-
-function buildIqRetailStep2Barcode(amount) {
-  // Scan 2: once the line has loaded, press Enter to accept the description,
-  // type the unit price/total, then press Enter to accept the value.
-  // Only CR control characters are used because this printer renders those
-  // reliably in Code 128; TAB control bytes corrupt barcode output on this unit.
-  return buildEscPosCode128(`{A\r{B${amount}{A\r`);
+  const encoded = `{B${String(data)}`;
+  return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`;
 }
 
 function normalizeUsbDevice(device, index) {
@@ -134,11 +120,19 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
 
   if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') {
     const { prefix, amount } = barcodeValue(order, receipt);
+
+    // Proven scanner behaviour from the IQ Retail test sheet:
+    // Code 128 code-only and amount-only barcodes scan reliably, and the scanners
+    // already append Enter after each barcode. Therefore do NOT embed CR/TAB
+    // characters inside either barcode. Scan the first barcode, wait for the item
+    // to load, then scan the second barcode. The scanner's normal suffix supplies
+    // the Enter between the two values and the final Enter after the amount.
     await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL - SCAN 1')) + '\n'));
-    await Promise.resolve(USBPrinter.printText(buildIqRetailStep1Barcode(prefix)));
+    await Promise.resolve(USBPrinter.printText(buildEscPosCode128(prefix)));
     await Promise.resolve(USBPrinter.printText(center(prefix) + '\n\n'));
+
     await Promise.resolve(USBPrinter.printText(center(bold('WAIT FOR ITEM TO LOAD - THEN SCAN 2')) + '\n'));
-    await Promise.resolve(USBPrinter.printText(buildIqRetailStep2Barcode(amount)));
+    await Promise.resolve(USBPrinter.printText(buildEscPosCode128(amount)));
     await Promise.resolve(USBPrinter.printText(center(amount) + '\n'));
   }
   if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { formatMoney, printOrderSlip } from '../utils/receiptPrinter';
 import { localDateKey } from '../utils/reports';
 import { theme } from '../theme';
@@ -9,6 +9,8 @@ function uid(prefix = 'id') {
 }
 
 export function NewOrderScreen({ menu, settings, onOrderSaved, getNextOrderNumber }) {
+  const { width } = useWindowDimensions();
+  const tabletLandscape = width >= 800;
   const activeSections = useMemo(() => menu.filter((s) => (s.items || []).some((i) => i.active)), [menu]);
   const [sectionId, setSectionId] = useState(activeSections[0]?.id || '');
   const [cart, setCart] = useState([]);
@@ -85,11 +87,63 @@ export function NewOrderScreen({ menu, settings, onOrderSaved, getNextOrderNumbe
       total,
     };
     await onOrderSaved(order);
-    await printOrderSlip(order, settings);
-    setCart([]);
-    setCustomerName('');
-    setTableNumber('');
-    setOrderNote('');
+    const result = await printOrderSlip(order, settings);
+    if (result?.printed !== false) {
+      setCart([]);
+      setCustomerName('');
+      setTableNumber('');
+      setOrderNote('');
+    }
+  }
+
+  function renderMenuPane() {
+    return <>
+      <View style={styles.typeRow}>
+        {['Takeaway', 'Sit-down'].map((type) => (
+          <TouchableOpacity key={type} onPress={() => setOrderType(type)} style={[styles.typeButton, orderType === type && styles.typeButtonActive]}>
+            <Text style={[styles.typeText, orderType === type && styles.typeTextActive]}>{type}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.fieldsRow}>
+        <TextInput placeholderTextColor={theme.colors.muted} style={styles.input} placeholder="Customer name (optional)" value={customerName} onChangeText={setCustomerName} />
+        <TextInput placeholderTextColor={theme.colors.muted} style={styles.input} placeholder="Table no. (optional)" value={tableNumber} onChangeText={setTableNumber} />
+      </View>
+
+      <Text style={styles.sectionTitle}>{section?.name || 'Menu'}</Text>
+      <View style={styles.menuGrid}>
+        {(section?.items || []).filter((item) => item.active).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)).map((item) => (
+          <TouchableOpacity key={item.id} disabled={item.soldOut} style={[styles.menuItem, tabletLandscape && styles.menuItemTablet, item.soldOut && styles.soldOutCard]} onPress={() => beginAdd(item)}>
+            <View style={styles.itemTop}><Text style={styles.itemName}>{item.name}</Text>{item.soldOut ? <Text style={styles.soldOut}>SOLD OUT</Text> : null}</View>
+            {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
+            <Text style={styles.itemPrice}>{formatMoney(item.price)}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </>;
+  }
+
+  function renderCart() {
+    return <View style={[styles.cart, tabletLandscape && styles.cartTablet]}>
+      <View style={styles.cartTitleRow}><Text style={styles.cartTitle}>Current Order</Text><Text style={styles.cartCount}>{cart.reduce((s, i) => s + i.qty, 0)} items</Text></View>
+      {!cart.length ? <Text style={styles.empty}>Tap a menu item to add it.</Text> : null}
+      {cart.map((item) => {
+        const unit = item.unitPrice + (item.selectedModifiers || []).reduce((s, m) => s + m.price, 0);
+        return <View key={item.lineId} style={styles.cartLine}>
+          <View style={styles.cartHeader}><Text style={styles.cartItemName}>{item.qty} × {item.name}</Text><Text style={styles.cartItemPrice}>{formatMoney(item.qty * unit)}</Text></View>
+          {(item.selectedModifiers || []).map((m) => <Text key={m.id} style={styles.modText}>+ {m.name} {formatMoney(m.price)}</Text>)}
+          <View style={styles.qtyRow}>
+            <TouchableOpacity onPress={() => changeQty(item.lineId, -1)} style={styles.qtyButton}><Text style={styles.qtyText}>−</Text></TouchableOpacity>
+            <Text style={styles.qtyNumber}>{item.qty}</Text>
+            <TouchableOpacity onPress={() => changeQty(item.lineId, 1)} style={styles.qtyButton}><Text style={styles.qtyText}>+</Text></TouchableOpacity>
+          </View>
+          <TextInput placeholderTextColor={theme.colors.muted} style={styles.noteInput} placeholder="Item note — extra hot, no tomato, etc." value={item.note} onChangeText={(note) => updateNote(item.lineId, note)} />
+        </View>;
+      })}
+      <TextInput placeholderTextColor={theme.colors.muted} style={styles.orderNote} placeholder="General order note" value={orderNote} onChangeText={setOrderNote} multiline />
+      <View style={styles.totalRow}><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.totalValue}>{formatMoney(total)}</Text></View>
+      <TouchableOpacity style={styles.printButton} onPress={saveAndPrint}><Text style={styles.printText}>SAVE & PRINT ORDER</Text></TouchableOpacity>
+    </View>;
   }
 
   return (
@@ -104,51 +158,17 @@ export function NewOrderScreen({ menu, settings, onOrderSaved, getNextOrderNumbe
         </ScrollView>
       </View>
 
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.typeRow}>
-          {['Takeaway', 'Sit-down'].map((type) => (
-            <TouchableOpacity key={type} onPress={() => setOrderType(type)} style={[styles.typeButton, orderType === type && styles.typeButtonActive]}>
-              <Text style={[styles.typeText, orderType === type && styles.typeTextActive]}>{type}</Text>
-            </TouchableOpacity>
-          ))}
+      {tabletLandscape ? (
+        <View style={styles.landscapeBody}>
+          <ScrollView style={styles.menuPane} contentContainerStyle={styles.landscapeScroll}>{renderMenuPane()}</ScrollView>
+          <ScrollView style={styles.cartPane} contentContainerStyle={styles.cartScroll}>{renderCart()}</ScrollView>
         </View>
-        <View style={styles.fieldsRow}>
-          <TextInput placeholderTextColor={theme.colors.muted} style={styles.input} placeholder="Customer name (optional)" value={customerName} onChangeText={setCustomerName} />
-          <TextInput placeholderTextColor={theme.colors.muted} style={styles.input} placeholder="Table no. (optional)" value={tableNumber} onChangeText={setTableNumber} />
-        </View>
-
-        <Text style={styles.sectionTitle}>{section?.name || 'Menu'}</Text>
-        <View style={styles.menuGrid}>
-          {(section?.items || []).filter((item) => item.active).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)).map((item) => (
-            <TouchableOpacity key={item.id} disabled={item.soldOut} style={[styles.menuItem, item.soldOut && styles.soldOutCard]} onPress={() => beginAdd(item)}>
-              <View style={styles.itemTop}><Text style={styles.itemName}>{item.name}</Text>{item.soldOut ? <Text style={styles.soldOut}>SOLD OUT</Text> : null}</View>
-              {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
-              <Text style={styles.itemPrice}>{formatMoney(item.price)}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.cart}>
-          <View style={styles.cartTitleRow}><Text style={styles.cartTitle}>Current Order</Text><Text style={styles.cartCount}>{cart.reduce((s, i) => s + i.qty, 0)} items</Text></View>
-          {!cart.length ? <Text style={styles.empty}>Tap a menu item to add it.</Text> : null}
-          {cart.map((item) => {
-            const unit = item.unitPrice + (item.selectedModifiers || []).reduce((s, m) => s + m.price, 0);
-            return <View key={item.lineId} style={styles.cartLine}>
-              <View style={styles.cartHeader}><Text style={styles.cartItemName}>{item.qty} × {item.name}</Text><Text style={styles.cartItemPrice}>{formatMoney(item.qty * unit)}</Text></View>
-              {(item.selectedModifiers || []).map((m) => <Text key={m.id} style={styles.modText}>+ {m.name} {formatMoney(m.price)}</Text>)}
-              <View style={styles.qtyRow}>
-                <TouchableOpacity onPress={() => changeQty(item.lineId, -1)} style={styles.qtyButton}><Text style={styles.qtyText}>−</Text></TouchableOpacity>
-                <Text style={styles.qtyNumber}>{item.qty}</Text>
-                <TouchableOpacity onPress={() => changeQty(item.lineId, 1)} style={styles.qtyButton}><Text style={styles.qtyText}>+</Text></TouchableOpacity>
-              </View>
-              <TextInput placeholderTextColor={theme.colors.muted} style={styles.noteInput} placeholder="Item note — extra hot, no tomato, etc." value={item.note} onChangeText={(note) => updateNote(item.lineId, note)} />
-            </View>;
-          })}
-          <TextInput placeholderTextColor={theme.colors.muted} style={styles.orderNote} placeholder="General order note" value={orderNote} onChangeText={setOrderNote} multiline />
-          <View style={styles.totalRow}><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.totalValue}>{formatMoney(total)}</Text></View>
-          <TouchableOpacity style={styles.printButton} onPress={saveAndPrint}><Text style={styles.printText}>SAVE & PRINT ORDER</Text></TouchableOpacity>
-        </View>
-      </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.container}>
+          {renderMenuPane()}
+          {renderCart()}
+        </ScrollView>
+      )}
 
       <Modal visible={Boolean(modifierItem)} transparent animationType="fade" onRequestClose={() => setModifierItem(null)}>
         <View style={styles.modalBackdrop}><View style={styles.modalCard}>
@@ -168,5 +188,5 @@ export function NewOrderScreen({ menu, settings, onOrderSaved, getNextOrderNumbe
 
 const c = theme.colors;
 const styles = StyleSheet.create({
-  root:{flex:1,backgroundColor:c.bg},categoryArea:{backgroundColor:c.bg,paddingTop:10,paddingBottom:4},categoryContent:{paddingHorizontal:14,paddingVertical:4,gap:8},category:{paddingHorizontal:18,paddingVertical:11,borderRadius:999,backgroundColor:'#3A3029'},categoryActive:{backgroundColor:c.green},categoryText:{color:'#E9E1D7',fontWeight:'800'},categoryTextActive:{color:'#fff'},container:{padding:14,paddingTop:10,paddingBottom:32},typeRow:{flexDirection:'row',gap:10,marginBottom:10},typeButton:{flex:1,padding:12,borderRadius:12,backgroundColor:c.surface,borderWidth:1,borderColor:c.line},typeButtonActive:{backgroundColor:c.green,borderColor:c.green},typeText:{textAlign:'center',fontWeight:'900',color:c.ink},typeTextActive:{color:'#fff'},fieldsRow:{flexDirection:'row',gap:10},input:{flex:1,backgroundColor:c.surface,color:c.ink,padding:12,borderRadius:12,marginBottom:14,borderWidth:1,borderColor:c.line},sectionTitle:{fontSize:22,fontWeight:'900',color:c.greenDark,marginBottom:10},menuGrid:{flexDirection:'row',flexWrap:'wrap',gap:10},menuItem:{width:'48%',backgroundColor:c.surface,borderRadius:16,padding:13,borderWidth:1,borderColor:c.line,minHeight:96},soldOutCard:{opacity:.5,backgroundColor:c.soft},itemTop:{gap:4},itemName:{fontSize:16,fontWeight:'900',color:c.ink},itemDescription:{color:c.muted,fontSize:12,marginTop:4},itemPrice:{color:c.red,fontWeight:'900',fontSize:17,marginTop:'auto',paddingTop:8},soldOut:{color:c.red,fontWeight:'900',fontSize:10},cart:{marginTop:18,backgroundColor:c.espresso,borderRadius:18,padding:14},cartTitleRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},cartTitle:{color:'#fff',fontSize:21,fontWeight:'900'},cartCount:{color:'#D8CFC6',fontWeight:'700'},empty:{color:'#D2C8BE',paddingVertical:16},cartLine:{backgroundColor:'#fff',borderRadius:13,padding:11,marginTop:10},cartHeader:{flexDirection:'row',justifyContent:'space-between',gap:8},cartItemName:{fontWeight:'900',fontSize:16,flex:1,color:c.ink},cartItemPrice:{fontWeight:'900',color:c.green},modText:{color:c.muted,marginTop:3,fontWeight:'700'},qtyRow:{flexDirection:'row',alignItems:'center',gap:10,marginTop:9},qtyButton:{backgroundColor:c.red,borderRadius:9,width:40,height:34,justifyContent:'center'},qtyText:{color:'#fff',textAlign:'center',fontSize:20,fontWeight:'900'},qtyNumber:{fontSize:17,fontWeight:'900',minWidth:22,textAlign:'center'},noteInput:{backgroundColor:c.bg,color:c.ink,borderRadius:9,padding:9,marginTop:9,borderWidth:1,borderColor:c.line},orderNote:{backgroundColor:'#fff',color:c.ink,borderRadius:12,padding:11,minHeight:54,marginTop:12},totalRow:{flexDirection:'row',justifyContent:'space-between',marginTop:15,marginBottom:12},totalLabel:{color:'#fff',fontWeight:'900',fontSize:21},totalValue:{color:'#fff',fontWeight:'900',fontSize:24},printButton:{backgroundColor:c.red,borderRadius:14,padding:15},printText:{color:'#fff',textAlign:'center',fontWeight:'900',fontSize:16},modalBackdrop:{flex:1,backgroundColor:'rgba(0,0,0,.55)',justifyContent:'center',padding:18},modalCard:{backgroundColor:'#fff',borderRadius:18,padding:17},modalTitle:{fontSize:22,fontWeight:'900',color:c.ink},modalSub:{color:c.muted,marginBottom:12},modChoice:{flexDirection:'row',justifyContent:'space-between',padding:13,borderRadius:11,backgroundColor:c.bg,marginBottom:8,borderWidth:1,borderColor:c.line},modChoiceActive:{backgroundColor:c.green,borderColor:c.green},modChoiceText:{fontWeight:'800',color:c.ink},modChoiceTextActive:{color:'#fff'},modalActions:{flexDirection:'row',gap:10,marginTop:8},secondaryButton:{flex:1,padding:13,borderRadius:11,backgroundColor:c.soft},secondaryText:{textAlign:'center',fontWeight:'900',color:c.ink},primaryButton:{flex:1,padding:13,borderRadius:11,backgroundColor:c.red},primaryText:{textAlign:'center',fontWeight:'900',color:'#fff'},
+  root:{flex:1,backgroundColor:c.bg},categoryArea:{backgroundColor:c.bg,paddingTop:8,paddingBottom:5,borderBottomWidth:1,borderBottomColor:c.line},categoryContent:{paddingHorizontal:14,paddingVertical:4,gap:8},category:{paddingHorizontal:18,paddingVertical:10,borderRadius:999,backgroundColor:'#3A3029'},categoryActive:{backgroundColor:c.green},categoryText:{color:'#E9E1D7',fontWeight:'800'},categoryTextActive:{color:'#fff'},container:{padding:14,paddingTop:10,paddingBottom:32},landscapeBody:{flex:1,flexDirection:'row',gap:12,paddingHorizontal:12,paddingBottom:10},menuPane:{flex:1.65},cartPane:{flex:1},landscapeScroll:{paddingTop:10,paddingBottom:20},cartScroll:{paddingTop:10,paddingBottom:20},typeRow:{flexDirection:'row',gap:10,marginBottom:10},typeButton:{flex:1,padding:11,borderRadius:12,backgroundColor:c.surface,borderWidth:1,borderColor:c.line},typeButtonActive:{backgroundColor:c.green,borderColor:c.green},typeText:{textAlign:'center',fontWeight:'900',color:c.ink},typeTextActive:{color:'#fff'},fieldsRow:{flexDirection:'row',gap:10},input:{flex:1,backgroundColor:c.surface,color:c.ink,padding:11,borderRadius:12,marginBottom:12,borderWidth:1,borderColor:c.line},sectionTitle:{fontSize:22,fontWeight:'900',color:c.greenDark,marginBottom:10},menuGrid:{flexDirection:'row',flexWrap:'wrap',gap:10},menuItem:{width:'48%',backgroundColor:c.surface,borderRadius:16,padding:13,borderWidth:1,borderColor:c.line,minHeight:96},menuItemTablet:{width:'31.8%',minHeight:104},soldOutCard:{opacity:.5,backgroundColor:c.soft},itemTop:{gap:4},itemName:{fontSize:16,fontWeight:'900',color:c.ink},itemDescription:{color:c.muted,fontSize:12,marginTop:4},itemPrice:{color:c.red,fontWeight:'900',fontSize:17,marginTop:'auto',paddingTop:8},soldOut:{color:c.red,fontWeight:'900',fontSize:10},cart:{marginTop:18,backgroundColor:c.espresso,borderRadius:18,padding:14},cartTablet:{marginTop:0,minHeight:'100%'},cartTitleRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},cartTitle:{color:'#fff',fontSize:21,fontWeight:'900'},cartCount:{color:'#D8CFC6',fontWeight:'700'},empty:{color:'#D2C8BE',paddingVertical:16},cartLine:{backgroundColor:'#fff',borderRadius:13,padding:11,marginTop:10},cartHeader:{flexDirection:'row',justifyContent:'space-between',gap:8},cartItemName:{fontWeight:'900',fontSize:16,flex:1,color:c.ink},cartItemPrice:{fontWeight:'900',color:c.green},modText:{color:c.muted,marginTop:3,fontWeight:'700'},qtyRow:{flexDirection:'row',alignItems:'center',gap:10,marginTop:9},qtyButton:{backgroundColor:c.red,borderRadius:9,width:40,height:34,justifyContent:'center'},qtyText:{color:'#fff',textAlign:'center',fontSize:20,fontWeight:'900'},qtyNumber:{fontSize:17,fontWeight:'900',minWidth:22,textAlign:'center'},noteInput:{backgroundColor:c.bg,color:c.ink,borderRadius:9,padding:9,marginTop:9,borderWidth:1,borderColor:c.line},orderNote:{backgroundColor:'#fff',color:c.ink,borderRadius:12,padding:11,minHeight:54,marginTop:12},totalRow:{flexDirection:'row',justifyContent:'space-between',marginTop:15,marginBottom:12},totalLabel:{color:'#fff',fontWeight:'900',fontSize:21},totalValue:{color:'#fff',fontWeight:'900',fontSize:24},printButton:{backgroundColor:c.red,borderRadius:14,padding:15},printText:{color:'#fff',textAlign:'center',fontWeight:'900',fontSize:16},modalBackdrop:{flex:1,backgroundColor:'rgba(0,0,0,.55)',justifyContent:'center',padding:18},modalCard:{backgroundColor:'#fff',borderRadius:18,padding:17,maxWidth:520,width:'100%',alignSelf:'center'},modalTitle:{fontSize:22,fontWeight:'900',color:c.ink},modalSub:{color:c.muted,marginBottom:12},modChoice:{flexDirection:'row',justifyContent:'space-between',padding:13,borderRadius:11,backgroundColor:c.bg,marginBottom:8,borderWidth:1,borderColor:c.line},modChoiceActive:{backgroundColor:c.green,borderColor:c.green},modChoiceText:{fontWeight:'800',color:c.ink},modChoiceTextActive:{color:'#fff'},modalActions:{flexDirection:'row',gap:10,marginTop:8},secondaryButton:{flex:1,padding:13,borderRadius:11,backgroundColor:c.soft},secondaryText:{textAlign:'center',fontWeight:'900',color:c.ink},primaryButton:{flex:1,padding:13,borderRadius:11,backgroundColor:c.red},primaryText:{textAlign:'center',fontWeight:'900',color:'#fff'},
 });

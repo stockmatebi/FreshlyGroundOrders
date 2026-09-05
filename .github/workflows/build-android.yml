@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Freshly Ground APK
+    name: Build Freshly Ground APK on GitHub
     runs-on: ubuntu-latest
 
     steps:
@@ -20,34 +20,38 @@ jobs:
         with:
           node-version: 24
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: npm install
 
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Generate Android native project
+        run: npx expo prebuild --platform android --no-install --clean
 
-      - name: Verify Expo account
-        run: eas whoami
-
-      - name: Build Android APK on EAS
-        run: eas build --platform android --profile preview --non-interactive --wait
-
-      - name: Download latest APK from EAS
-        shell: bash
+      - name: Build installable APK directly with Gradle
+        working-directory: android
         run: |
-          eas build:list --platform android --status finished --limit 1 --json --non-interactive > eas-build.json
-          node -e "const fs=require('fs'); const b=JSON.parse(fs.readFileSync('eas-build.json','utf8'))[0]; if(!b?.artifacts?.buildUrl) process.exit(2); fs.writeFileSync('build-url.txt',b.artifacts.buildUrl);"
-          BUILD_URL=$(cat build-url.txt)
-          curl -L --fail "$BUILD_URL" -o FreshlyGroundOrders-v2.1.0.apk
-          test -s FreshlyGroundOrders-v2.1.0.apk
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Stage APK
+        run: |
+          mkdir -p release-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk release-apk/FreshlyGroundOrders-latest.apk
+          test -s release-apk/FreshlyGroundOrders-latest.apk
+          ls -lh release-apk/FreshlyGroundOrders-latest.apk
 
       - name: Upload APK for direct download
         uses: actions/upload-artifact@v4
         with:
-          name: FreshlyGroundOrders-v2.1.0-APK
-          path: FreshlyGroundOrders-v2.1.0.apk
+          name: FreshlyGroundOrders-GitHub-APK
+          path: release-apk/FreshlyGroundOrders-latest.apk
           if-no-files-found: error
           retention-days: 30

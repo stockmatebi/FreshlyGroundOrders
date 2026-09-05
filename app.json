@@ -2,8 +2,8 @@
   "expo": {
     "name": "Freshly Ground Orders",
     "slug": "freshly-ground-orders",
-    "version": "2.0.1",
-    "orientation": "default",
+    "version": "2.1.0",
+    "orientation": "landscape",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "plugins": [
@@ -11,7 +11,7 @@
     ],
     "android": {
       "package": "com.freshlyground.orders",
-      "versionCode": 3
+      "versionCode": 4
     },
     "owner": "megastockmate",
     "extra": {

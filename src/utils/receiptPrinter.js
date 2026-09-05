@@ -1,4 +1,5 @@
 import { Alert, Platform } from 'react-native';
+import { receiptLogoBase64 } from '../assets/receiptLogo';
 
 let cachedPrinterModule;
 
@@ -49,14 +50,19 @@ function bold(text) {
 export function buildSlipText(order, receipt = {}, options = {}) {
   const isReprint = Boolean(options.reprint);
   const lines = [];
+
   if (isReprint) {
     lines.push(center('*** REPRINT ***'));
     lines.push('');
   }
-  lines.push(center(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS')));
+
+  if (receipt.showLogo === false) {
+    lines.push(center(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS')));
+  }
   if (receipt.headerLine1) lines.push(center(receipt.headerLine1));
   if (receipt.headerLine2) lines.push(center(receipt.headerLine2));
   if (receipt.phone) lines.push(center(receipt.phone));
+
   lines.push(hr());
   lines.push(bold(`ORDER #${order.number}`));
   lines.push(order.createdAtText || new Date(order.createdAt).toLocaleString('en-ZA'));
@@ -67,7 +73,9 @@ export function buildSlipText(order, receipt = {}, options = {}) {
 
   (order.items || []).forEach((item) => {
     const unit = Number(item.unitPrice ?? item.price ?? 0);
-    const price = receipt.showPrices === false ? '' : `  ${formatMoney(item.qty * unit)}`;
+    const modifierValue = (item.selectedModifiers || []).reduce((sum, mod) => sum + Number(mod.price || 0), 0);
+    const lineTotal = Number(item.qty || 0) * (unit + modifierValue);
+    const price = receipt.showPrices === false ? '' : `  ${formatMoney(lineTotal)}`;
     lines.push(bold(`${item.qty} x ${item.name}${price}`));
     (item.selectedModifiers || []).forEach((mod) => {
       const modPrice = receipt.showPrices === false ? '' : ` +${formatMoney(mod.price)}`;
@@ -87,8 +95,28 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   if (receipt.showTotal !== false) lines.push(bold(`TOTAL: ${formatMoney(order.total)}`));
   lines.push(hr());
   if (receipt.footer) lines.push(center(receipt.footer));
-  lines.push(...Array(Math.max(1, Number(receipt.feedLines || 4))).fill(''));
-  return lines.join('\n');
+  return lines.join('\n') + '\n';
+}
+
+export function barcodeValue(order, receipt = {}) {
+  const prefix = String(receipt.barcodePrefix || '31010001').replace(/\D/g, '') || '31010001';
+  const amount = Number(order?.total || 0).toFixed(2);
+  return { prefix, amount, display: `${prefix}  ${amount}` };
+}
+
+function buildCode128WithEnter(prefix, amount) {
+  // One Code128 barcode: 31010001, carriage-return/Enter, then the numeric total.
+  // No R or other currency text is encoded.
+  const data = `{B${prefix}{A\r{B${amount}`;
+  const GS = '\x1d';
+  const ESC = '\x1b';
+  const hriNone = `${GS}H\x00`;
+  const height = `${GS}h\x58`;
+  const width = `${GS}w\x02`;
+  const centerAlign = `${ESC}a\x01`;
+  const leftAlign = `${ESC}a\x00`;
+  const barcode = `${GS}k\x49${String.fromCharCode(data.length)}${data}`;
+  return `${centerAlign}${hriNone}${height}${width}${barcode}\n${leftAlign}`;
 }
 
 function normalizeUsbDevice(device, index) {
@@ -138,15 +166,41 @@ export async function printOrderSlip(order, settings, options = {}) {
 
   try {
     const USBPrinter = await connect(printer);
+
+    if (receipt.showLogo !== false && typeof USBPrinter.printImageBase64 === 'function') {
+      await Promise.resolve(USBPrinter.printImageBase64(receiptLogoBase64, { imageWidth: 520 }));
+      if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n'));
+    }
+
     const text = buildSlipText(order, receipt, options);
-    if (typeof USBPrinter.printBill !== 'function') {
+    if (typeof USBPrinter.printText === 'function') {
+      await Promise.resolve(USBPrinter.printText(text));
+    } else if (typeof USBPrinter.printBill === 'function') {
+      await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
+    } else {
       throw new Error('USB print function is unavailable in this build.');
     }
-    await Promise.resolve(USBPrinter.printBill(text, {
-      cut: receipt.autoCut !== false,
-      tailingLine: true,
-      encoding: 'UTF-8',
-    }));
+
+    if (receipt.showBarcode !== false) {
+      const { prefix, amount, display } = barcodeValue(order, receipt);
+      if (typeof USBPrinter.printText === 'function') {
+        await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
+      }
+      if (typeof USBPrinter.printRaw === 'function') {
+        await Promise.resolve(USBPrinter.printRaw(buildCode128WithEnter(prefix, amount)));
+      } else if (typeof USBPrinter.printText === 'function') {
+        await Promise.resolve(USBPrinter.printText(center(`${prefix}  ${amount}`) + '\n'));
+      }
+    }
+
+    if (typeof USBPrinter.printBill === 'function') {
+      await Promise.resolve(USBPrinter.printBill('\n', {
+        cut: receipt.autoCut !== false,
+        tailingLine: true,
+        encoding: 'UTF-8',
+      }));
+    }
+
     return { printed: true };
   } catch (error) {
     console.warn('USB print failed:', error?.message || error);

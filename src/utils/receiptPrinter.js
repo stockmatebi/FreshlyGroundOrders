@@ -67,15 +67,25 @@ export function barcodeValue(order, receipt = {}) {
   return { prefix, amount, display: `${prefix}  ${amount}` };
 }
 
-function buildCode128ForIqRetail(prefix, amount) {
-  // Keep the barcode payload to the control sequence already proven to render
-  // correctly on the installed 80 mm ESC/POS printer. TAB bytes caused this
-  // printer firmware to output corrupted characters instead of barcode bars.
-  // IQ Retail sequence: stock code, Enter, Enter, amount, Enter.
-  const data = `{B${prefix}{A\r\r{B${amount}{A\r`;
+function buildEscPosCode128(data) {
   const GS = '\x1d';
   const ESC = '\x1b';
   return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(data.length)}${data}\n${ESC}a\x00`;
+}
+
+function buildIqRetailStep1Barcode(prefix) {
+  // Scan 1: enter stock code and press Enter. The cashier waits for IQ Retail
+  // to finish loading the line before scanning step 2. This avoids IQ dropping
+  // keystrokes while the stock line is still being created.
+  return buildEscPosCode128(`{B${prefix}{A\r`);
+}
+
+function buildIqRetailStep2Barcode(amount) {
+  // Scan 2: once the line has loaded, press Enter to accept the description,
+  // type the unit price/total, then press Enter to accept the value.
+  // Only CR control characters are used because this printer renders those
+  // reliably in Code 128; TAB control bytes corrupt barcode output on this unit.
+  return buildEscPosCode128(`{A\r{B${amount}{A\r`);
 }
 
 function normalizeUsbDevice(device, index) {
@@ -122,12 +132,14 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
   else if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
   else throw new Error('USB print function is unavailable in this build.');
 
-  if (receipt.showBarcode !== false) {
-    const { prefix, amount, display } = barcodeValue(order, receipt);
-    if (typeof USBPrinter.printText === 'function') {
-      await Promise.resolve(USBPrinter.printText(buildCode128ForIqRetail(prefix, amount)));
-      await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
-    }
+  if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') {
+    const { prefix, amount } = barcodeValue(order, receipt);
+    await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL - SCAN 1')) + '\n'));
+    await Promise.resolve(USBPrinter.printText(buildIqRetailStep1Barcode(prefix)));
+    await Promise.resolve(USBPrinter.printText(center(prefix) + '\n\n'));
+    await Promise.resolve(USBPrinter.printText(center(bold('WAIT FOR ITEM TO LOAD - THEN SCAN 2')) + '\n'));
+    await Promise.resolve(USBPrinter.printText(buildIqRetailStep2Barcode(amount)));
+    await Promise.resolve(USBPrinter.printText(center(amount) + '\n'));
   }
   if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));
 }

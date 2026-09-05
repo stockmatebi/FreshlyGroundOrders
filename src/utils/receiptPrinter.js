@@ -71,9 +71,10 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     lines.push('');
   }
 
-  if (receipt.showLogo === false) {
-    lines.push(center(large(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS'))));
-  }
+  // Always print the business name as a readable fallback underneath the graphic logo.
+  // That way the receipt still has a proper branded header even if a particular
+  // ESC/POS printer ignores bitmap-image commands.
+  lines.push(center(large(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS'))));
   if (receipt.headerLine1) lines.push(center(receipt.headerLine1));
   if (receipt.headerLine2) lines.push(center(receipt.headerLine2));
   if (receipt.phone) lines.push(center(receipt.phone));
@@ -89,8 +90,6 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   (order.items || []).forEach((item) => {
     const qty = Number(item.qty || 0);
     const baseUnit = Number(item.unitPrice ?? item.price ?? 0);
-    // Show the base item value on its own line. Modifiers are printed separately below it,
-    // so the visible receipt arithmetic now adds up exactly to the order total.
     const baseLineTotal = qty * baseUnit;
     const price = receipt.showPrices === false ? '' : `  ${formatMoney(baseLineTotal)}`;
     lines.push(doubleHeight(bold(`${qty} x ${item.name}${price}`)));
@@ -123,15 +122,17 @@ export function barcodeValue(order, receipt = {}) {
 }
 
 function buildCode128WithEnter(prefix, amount) {
-  // Code 128 payload: 31010001, carriage return (Enter), then numeric total only.
-  const data = `{B${prefix}{A\r{B${amount}`;
+  // Code 128 payload:
+  //   31010001 -> Enter -> numeric total -> Enter
+  // The final Enter commits the amount in the till after the barcode scanner types it.
+  const data = `{B${prefix}{A\r{B${amount}{A\r`;
   const GS = '\x1d';
   const ESC = '\x1b';
   return (
-    `${ESC}a\x01` +          // centre
-    `${GS}H\x00` +           // no HRI text from printer
-    `${GS}h\x64` +           // barcode height
-    `${GS}w\x02` +           // module width
+    `${ESC}a\x01` +
+    `${GS}H\x00` +
+    `${GS}h\x64` +
+    `${GS}w\x02` +
     `${GS}k\x49${String.fromCharCode(data.length)}${data}` +
     `\n${ESC}a\x00`
   );
@@ -171,14 +172,33 @@ async function connect(printer) {
   return USBPrinter;
 }
 
-async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
-  // The original logo asset was too wide/complex for this printer driver. This replacement
-  // is a compact 384px RGB monochrome PNG made from the supplied Freshly Ground Express logo.
-  if (receipt.showLogo !== false && typeof USBPrinter.printImageBase64 === 'function') {
-    await Promise.resolve(USBPrinter.printImageBase64(receiptLogoBase64, { imageWidth: 384 }));
+async function printReceiptLogo(USBPrinter) {
+  if (typeof USBPrinter.printImageBase64 !== 'function') return false;
+
+  try {
+    // Keep the bitmap comfortably below the 80 mm printhead width and explicitly
+    // request centred alignment. The library's Android USB path decodes this Base64
+    // PNG natively before converting it to ESC/POS raster data.
+    const cleanBase64 = String(receiptLogoBase64 || '').replace(/\s+/g, '');
+    await Promise.resolve(
+      USBPrinter.printImageBase64(cleanBase64, {
+        imageWidth: 320,
+        align: 'center',
+      })
+    );
     if (typeof USBPrinter.printText === 'function') {
       await Promise.resolve(USBPrinter.printText('\n'));
     }
+    return true;
+  } catch (error) {
+    console.warn('Receipt logo print failed:', error?.message || error);
+    return false;
+  }
+}
+
+async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
+  if (receipt.showLogo !== false) {
+    await printReceiptLogo(USBPrinter);
   }
 
   const text = buildSlipText(order, receipt, options);
@@ -193,9 +213,6 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
   if (receipt.showBarcode !== false) {
     const { prefix, amount, display } = barcodeValue(order, receipt);
     if (typeof USBPrinter.printText === 'function') {
-      // Formatting ESC/POS commands already work through printText on the POS-8360.
-      // Sending the barcode command through printText avoids the broken printRaw path
-      // that produced the stray "h" character on the previous receipt.
       await Promise.resolve(USBPrinter.printText(buildCode128WithEnter(prefix, amount)));
       await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
     }

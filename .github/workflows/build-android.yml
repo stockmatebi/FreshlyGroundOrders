@@ -8,8 +8,11 @@ on:
 
 jobs:
   build:
-    name: Build Freshly Ground APK on GitHub
+    name: Build Freshly Ground Standalone APK on GitHub
     runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: production
 
     steps:
       - name: Checkout repository
@@ -35,23 +38,23 @@ jobs:
       - name: Generate Android native project
         run: npx expo prebuild --platform android --no-install --clean
 
-      - name: Build installable APK directly with Gradle
+      - name: Build standalone release APK with bundled JavaScript
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       - name: Stage APK
         run: |
           mkdir -p release-apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk release-apk/FreshlyGroundOrders-latest.apk
+          cp android/app/build/outputs/apk/release/app-release.apk release-apk/FreshlyGroundOrders-latest.apk
           test -s release-apk/FreshlyGroundOrders-latest.apk
           ls -lh release-apk/FreshlyGroundOrders-latest.apk
 
       - name: Upload APK for direct download
         uses: actions/upload-artifact@v4
         with:
-          name: FreshlyGroundOrders-GitHub-APK
+          name: FreshlyGroundOrders-Standalone-APK
           path: release-apk/FreshlyGroundOrders-latest.apk
           if-no-files-found: error
           retention-days: 30

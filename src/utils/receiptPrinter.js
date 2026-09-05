@@ -47,9 +47,25 @@ function bold(text) {
   return `${on}${text}${off}`;
 }
 
+function large(text) {
+  const ESC = '\x1b';
+  return `${ESC}!\x30${text}${ESC}!\x00`;
+}
+
+function doubleHeight(text) {
+  const ESC = '\x1b';
+  return `${ESC}!\x10${text}${ESC}!\x00`;
+}
+
 export function buildSlipText(order, receipt = {}, options = {}) {
   const isReprint = Boolean(options.reprint);
+  const copyLabel = options.copyLabel || '';
   const lines = [];
+
+  if (copyLabel) {
+    lines.push(center(large(bold(copyLabel))));
+    lines.push('');
+  }
 
   if (isReprint) {
     lines.push(center('*** REPRINT ***'));
@@ -64,11 +80,11 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   if (receipt.phone) lines.push(center(receipt.phone));
 
   lines.push(hr());
-  lines.push(bold(`ORDER #${order.number}`));
+  lines.push(center(large(bold(`ORDER #${order.number}`))));
   lines.push(order.createdAtText || new Date(order.createdAt).toLocaleString('en-ZA'));
-  if (receipt.showOrderType !== false) lines.push(bold(order.orderType || ''));
-  if (receipt.showCustomer !== false && order.customerName) lines.push(`Customer: ${order.customerName}`);
-  if (receipt.showTable !== false && order.tableNumber) lines.push(`Table: ${order.tableNumber}`);
+  if (receipt.showOrderType !== false) lines.push(center(doubleHeight(bold(order.orderType || ''))));
+  if (receipt.showCustomer !== false && order.customerName) lines.push(doubleHeight(`Customer: ${order.customerName}`));
+  if (receipt.showTable !== false && order.tableNumber) lines.push(doubleHeight(`Table: ${order.tableNumber}`));
   lines.push('');
 
   (order.items || []).forEach((item) => {
@@ -76,23 +92,23 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     const modifierValue = (item.selectedModifiers || []).reduce((sum, mod) => sum + Number(mod.price || 0), 0);
     const lineTotal = Number(item.qty || 0) * (unit + modifierValue);
     const price = receipt.showPrices === false ? '' : `  ${formatMoney(lineTotal)}`;
-    lines.push(bold(`${item.qty} x ${item.name}${price}`));
+    lines.push(doubleHeight(bold(`${item.qty} x ${item.name}${price}`)));
     (item.selectedModifiers || []).forEach((mod) => {
       const modPrice = receipt.showPrices === false ? '' : ` +${formatMoney(mod.price)}`;
-      lines.push(`   + ${mod.name}${modPrice}`);
+      lines.push(bold(`   + ${mod.name}${modPrice}`));
     });
-    if (receipt.showNotes !== false && item.note) lines.push(`   NOTE: ${item.note}`);
+    if (receipt.showNotes !== false && item.note) lines.push(bold(`   NOTE: ${item.note}`));
   });
 
   if (receipt.showNotes !== false && order.orderNote) {
     lines.push('');
-    lines.push(bold('ORDER NOTE:'));
-    lines.push(order.orderNote);
+    lines.push(doubleHeight(bold('ORDER NOTE:')));
+    lines.push(doubleHeight(bold(order.orderNote)));
   }
 
   lines.push('');
   lines.push(hr());
-  if (receipt.showTotal !== false) lines.push(bold(`TOTAL: ${formatMoney(order.total)}`));
+  if (receipt.showTotal !== false) lines.push(center(large(bold(`TOTAL: ${formatMoney(order.total)}`))));
   lines.push(hr());
   if (receipt.footer) lines.push(center(receipt.footer));
   return lines.join('\n') + '\n';
@@ -105,14 +121,12 @@ export function barcodeValue(order, receipt = {}) {
 }
 
 function buildCode128WithEnter(prefix, amount) {
-  // One Code128 barcode: 31010001, carriage-return/Enter, then the numeric total.
-  // No R or other currency text is encoded.
   const data = `{B${prefix}{A\r{B${amount}`;
   const GS = '\x1d';
   const ESC = '\x1b';
   const hriNone = `${GS}H\x00`;
-  const height = `${GS}h\x58`;
-  const width = `${GS}w\x02`;
+  const height = `${GS}h\x64`;
+  const width = `${GS}w\x03`;
   const centerAlign = `${ESC}a\x01`;
   const leftAlign = `${ESC}a\x00`;
   const barcode = `${GS}k\x49${String.fromCharCode(data.length)}${data}`;
@@ -156,6 +170,40 @@ async function connect(printer) {
   return USBPrinter;
 }
 
+async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
+  if (receipt.showLogo !== false && typeof USBPrinter.printImageBase64 === 'function') {
+    await Promise.resolve(USBPrinter.printImageBase64(receiptLogoBase64, { imageWidth: 520 }));
+    if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n'));
+  }
+
+  const text = buildSlipText(order, receipt, options);
+  if (typeof USBPrinter.printText === 'function') {
+    await Promise.resolve(USBPrinter.printText(text));
+  } else if (typeof USBPrinter.printBill === 'function') {
+    await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
+  } else {
+    throw new Error('USB print function is unavailable in this build.');
+  }
+
+  if (receipt.showBarcode !== false) {
+    const { prefix, amount, display } = barcodeValue(order, receipt);
+    if (typeof USBPrinter.printText === 'function') {
+      await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
+    }
+    if (typeof USBPrinter.printRaw === 'function') {
+      await Promise.resolve(USBPrinter.printRaw(buildCode128WithEnter(prefix, amount)));
+    }
+  }
+
+  if (typeof USBPrinter.printBill === 'function') {
+    await Promise.resolve(USBPrinter.printBill('\n', {
+      cut: receipt.autoCut !== false,
+      tailingLine: true,
+      encoding: 'UTF-8',
+    }));
+  }
+}
+
 export async function printOrderSlip(order, settings, options = {}) {
   const printer = settings?.printer;
   const receipt = settings?.receipt || {};
@@ -167,41 +215,10 @@ export async function printOrderSlip(order, settings, options = {}) {
   try {
     const USBPrinter = await connect(printer);
 
-    if (receipt.showLogo !== false && typeof USBPrinter.printImageBase64 === 'function') {
-      await Promise.resolve(USBPrinter.printImageBase64(receiptLogoBase64, { imageWidth: 520 }));
-      if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n'));
-    }
+    await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
+    await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
 
-    const text = buildSlipText(order, receipt, options);
-    if (typeof USBPrinter.printText === 'function') {
-      await Promise.resolve(USBPrinter.printText(text));
-    } else if (typeof USBPrinter.printBill === 'function') {
-      await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
-    } else {
-      throw new Error('USB print function is unavailable in this build.');
-    }
-
-    if (receipt.showBarcode !== false) {
-      const { prefix, amount, display } = barcodeValue(order, receipt);
-      if (typeof USBPrinter.printText === 'function') {
-        await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
-      }
-      if (typeof USBPrinter.printRaw === 'function') {
-        await Promise.resolve(USBPrinter.printRaw(buildCode128WithEnter(prefix, amount)));
-      } else if (typeof USBPrinter.printText === 'function') {
-        await Promise.resolve(USBPrinter.printText(center(`${prefix}  ${amount}`) + '\n'));
-      }
-    }
-
-    if (typeof USBPrinter.printBill === 'function') {
-      await Promise.resolve(USBPrinter.printBill('\n', {
-        cut: receipt.autoCut !== false,
-        tailingLine: true,
-        encoding: 'UTF-8',
-      }));
-    }
-
-    return { printed: true };
+    return { printed: true, copies: 2 };
   } catch (error) {
     console.warn('USB print failed:', error?.message || error);
     Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.');

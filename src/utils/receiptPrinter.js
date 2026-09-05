@@ -14,68 +14,25 @@ function getPrinterModule() {
   return cachedPrinterModule;
 }
 
-function getUsbPrinter() {
-  return getPrinterModule()?.USBPrinter || null;
-}
-
-function getCommands() {
-  return getPrinterModule()?.COMMANDS || null;
-}
-
-export function formatMoney(value) {
-  return `R${Number(value || 0).toFixed(2)}`;
-}
-
-function hr() {
-  return getCommands()?.HORIZONTAL_LINE?.HR_80MM || '------------------------------------------------';
-}
-
-function center(text) {
-  const commands = getCommands();
-  return `${commands?.TEXT_FORMAT?.TXT_ALIGN_CT || ''}${text}${commands?.TEXT_FORMAT?.TXT_ALIGN_LT || ''}`;
-}
-
-function bold(text) {
-  const commands = getCommands();
-  return `${commands?.TEXT_FORMAT?.TXT_BOLD_ON || ''}${text}${commands?.TEXT_FORMAT?.TXT_BOLD_OFF || ''}`;
-}
-
-function large(text) {
-  const commands = getCommands();
-  if (commands?.TEXT_FORMAT?.TXT_4SQUARE && commands?.TEXT_FORMAT?.TXT_NORMAL) {
-    return `${commands.TEXT_FORMAT.TXT_4SQUARE}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`;
-  }
-  return `\x1b!\x30${text}\x1b!\x00`;
-}
-
-function doubleHeight(text) {
-  const commands = getCommands();
-  if (commands?.TEXT_FORMAT?.TXT_2HEIGHT && commands?.TEXT_FORMAT?.TXT_NORMAL) {
-    return `${commands.TEXT_FORMAT.TXT_2HEIGHT}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`;
-  }
-  return `\x1b!\x10${text}\x1b!\x00`;
-}
+function getUsbPrinter() { return getPrinterModule()?.USBPrinter || null; }
+function getCommands() { return getPrinterModule()?.COMMANDS || null; }
+export function formatMoney(value) { return `R${Number(value || 0).toFixed(2)}`; }
+function hr() { return getCommands()?.HORIZONTAL_LINE?.HR_80MM || '------------------------------------------------'; }
+function center(text) { const commands = getCommands(); return `${commands?.TEXT_FORMAT?.TXT_ALIGN_CT || ''}${text}${commands?.TEXT_FORMAT?.TXT_ALIGN_LT || ''}`; }
+function bold(text) { const commands = getCommands(); return `${commands?.TEXT_FORMAT?.TXT_BOLD_ON || ''}${text}${commands?.TEXT_FORMAT?.TXT_BOLD_OFF || ''}`; }
+function large(text) { const commands = getCommands(); if (commands?.TEXT_FORMAT?.TXT_4SQUARE && commands?.TEXT_FORMAT?.TXT_NORMAL) return `${commands.TEXT_FORMAT.TXT_4SQUARE}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`; return `\x1b!\x30${text}\x1b!\x00`; }
+function doubleHeight(text) { const commands = getCommands(); if (commands?.TEXT_FORMAT?.TXT_2HEIGHT && commands?.TEXT_FORMAT?.TXT_NORMAL) return `${commands.TEXT_FORMAT.TXT_2HEIGHT}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`; return `\x1b!\x10${text}\x1b!\x00`; }
 
 export function buildSlipText(order, receipt = {}, options = {}) {
   const isReprint = Boolean(options.reprint);
   const copyLabel = options.copyLabel || '';
   const lines = [];
-
-  if (copyLabel) {
-    lines.push(center(large(bold(copyLabel))));
-    lines.push('');
-  }
-
-  if (isReprint) {
-    lines.push(center(bold('*** REPRINT ***')));
-    lines.push('');
-  }
-
+  if (copyLabel) { lines.push(center(large(bold(copyLabel)))); lines.push(''); }
+  if (isReprint) { lines.push(center(bold('*** REPRINT ***'))); lines.push(''); }
   lines.push(center(large(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS'))));
   if (receipt.headerLine1) lines.push(center(receipt.headerLine1));
   if (receipt.headerLine2) lines.push(center(receipt.headerLine2));
   if (receipt.phone) lines.push(center(receipt.phone));
-
   lines.push(hr());
   lines.push(center(large(bold(`ORDER #${order.number}`))));
   lines.push(order.createdAtText || new Date(order.createdAt).toLocaleString('en-ZA'));
@@ -83,7 +40,6 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   if (receipt.showCustomer !== false && order.customerName) lines.push(doubleHeight(`Customer: ${order.customerName}`));
   if (receipt.showTable !== false && order.tableNumber) lines.push(doubleHeight(`Table: ${order.tableNumber}`));
   lines.push('');
-
   (order.items || []).forEach((item) => {
     const qty = Number(item.qty || 0);
     const baseUnit = Number(item.unitPrice ?? item.price ?? 0);
@@ -97,15 +53,8 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     });
     if (receipt.showNotes !== false && item.note) lines.push(bold(`   NOTE: ${item.note}`));
   });
-
-  if (receipt.showNotes !== false && order.orderNote) {
-    lines.push('');
-    lines.push(doubleHeight(bold('ORDER NOTE:')));
-    lines.push(doubleHeight(bold(order.orderNote)));
-  }
-
-  lines.push('');
-  lines.push(hr());
+  if (receipt.showNotes !== false && order.orderNote) { lines.push(''); lines.push(doubleHeight(bold('ORDER NOTE:'))); lines.push(doubleHeight(bold(order.orderNote))); }
+  lines.push(''); lines.push(hr());
   if (receipt.showTotal !== false) lines.push(center(large(bold(`TOTAL: ${formatMoney(order.total)}`))));
   lines.push(hr());
   if (receipt.footer) lines.push(center(receipt.footer));
@@ -119,38 +68,21 @@ export function barcodeValue(order, receipt = {}) {
 }
 
 function buildCode128ForIqRetail(prefix, amount) {
-  // IQ Retail line-entry navigation:
-  // 1) stock code + Enter opens the item/description
-  // 2) use Tab navigation rather than a second Enter, because a second Enter can
-  //    commit/advance the line and leave the scanned amount in the Markup field
-  // 3) Description -> Type -> Unit Price = two Tabs
-  // 4) type the numerical total and Enter to accept it
-  //
-  // Using Tabs also avoids relying on IQ Retail's variable processing time between
-  // consecutive Enter keys.
-  const data = `{B${prefix}{A\r\t\t{B${amount}{A\r`;
+  // Keep the barcode payload to the control sequence already proven to render
+  // correctly on the installed 80 mm ESC/POS printer. TAB bytes caused this
+  // printer firmware to output corrupted characters instead of barcode bars.
+  // IQ Retail sequence: stock code, Enter, Enter, amount, Enter.
+  const data = `{B${prefix}{A\r\r{B${amount}{A\r`;
   const GS = '\x1d';
   const ESC = '\x1b';
-  return (
-    `${ESC}a\x01` +
-    `${GS}H\x00` +
-    `${GS}h\x64` +
-    `${GS}w\x02` +
-    `${GS}k\x49${String.fromCharCode(data.length)}${data}` +
-    `\n${ESC}a\x00`
-  );
+  return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(data.length)}${data}\n${ESC}a\x00`;
 }
 
 function normalizeUsbDevice(device, index) {
   const vendorId = Number(device?.vendorId ?? device?.vendor_id);
   const productId = Number(device?.productId ?? device?.product_id);
   if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return null;
-  return {
-    id: `${vendorId}-${productId}-${index}`,
-    name: device?.deviceName || device?.device_name || 'USB Thermal Printer',
-    vendorId,
-    productId,
-  };
+  return { id: `${vendorId}-${productId}-${index}`, name: device?.deviceName || device?.device_name || 'USB Thermal Printer', vendorId, productId };
 }
 
 export async function listUsbPrinters() {
@@ -167,9 +99,7 @@ async function connect(printer) {
   if (!USBPrinter) throw new Error('USB printer module is not available in this build.');
   const vendorId = Number(printer?.vendorId);
   const productId = Number(printer?.productId);
-  if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) {
-    throw new Error('The selected USB printer has invalid device IDs. Please detect and select it again.');
-  }
+  if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) throw new Error('The selected USB printer has invalid device IDs. Please detect and select it again.');
   await USBPrinter.init();
   await USBPrinter.connectPrinter(vendorId, productId);
   return USBPrinter;
@@ -179,35 +109,18 @@ async function printReceiptLogo(USBPrinter) {
   if (typeof USBPrinter.printImageBase64 !== 'function') return false;
   try {
     const cleanBase64 = String(receiptLogoBase64 || '').replace(/\s+/g, '');
-    await Promise.resolve(
-      USBPrinter.printImageBase64(cleanBase64, {
-        imageWidth: 320,
-        align: 'center',
-      })
-    );
-    if (typeof USBPrinter.printText === 'function') {
-      await Promise.resolve(USBPrinter.printText('\n'));
-    }
+    await Promise.resolve(USBPrinter.printImageBase64(cleanBase64, { imageWidth: 320, align: 'center' }));
+    if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n'));
     return true;
-  } catch (error) {
-    console.warn('Receipt logo print failed:', error?.message || error);
-    return false;
-  }
+  } catch (error) { console.warn('Receipt logo print failed:', error?.message || error); return false; }
 }
 
 async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
-  if (receipt.showLogo !== false) {
-    await printReceiptLogo(USBPrinter);
-  }
-
+  if (receipt.showLogo !== false) await printReceiptLogo(USBPrinter);
   const text = buildSlipText(order, receipt, options);
-  if (typeof USBPrinter.printText === 'function') {
-    await Promise.resolve(USBPrinter.printText(text));
-  } else if (typeof USBPrinter.printBill === 'function') {
-    await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
-  } else {
-    throw new Error('USB print function is unavailable in this build.');
-  }
+  if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(text));
+  else if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
+  else throw new Error('USB print function is unavailable in this build.');
 
   if (receipt.showBarcode !== false) {
     const { prefix, amount, display } = barcodeValue(order, receipt);
@@ -216,24 +129,13 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
       await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
     }
   }
-
-  if (typeof USBPrinter.printBill === 'function') {
-    await Promise.resolve(USBPrinter.printBill('\n', {
-      cut: receipt.autoCut !== false,
-      tailingLine: true,
-      encoding: 'UTF-8',
-    }));
-  }
+  if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));
 }
 
 export async function printOrderSlip(order, settings, options = {}) {
   const printer = settings?.printer;
   const receipt = settings?.receipt || {};
-  if (!printer) {
-    Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.');
-    return { printed: false, reason: 'No printer selected' };
-  }
-
+  if (!printer) { Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.'); return { printed: false, reason: 'No printer selected' }; }
   try {
     const USBPrinter = await connect(printer);
     await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
@@ -247,21 +149,8 @@ export async function printOrderSlip(order, settings, options = {}) {
 }
 
 export async function printTestSlip(settings) {
-  if (!settings?.printer) {
-    Alert.alert('USB printer not selected', 'Detect and select the POS-8360 first.');
-    return { printed: false, reason: 'No printer selected' };
-  }
+  if (!settings?.printer) { Alert.alert('USB printer not selected', 'Detect and select the POS-8360 first.'); return { printed: false, reason: 'No printer selected' }; }
   const now = new Date();
-  const order = {
-    number: 'TEST',
-    createdAt: now.toISOString(),
-    createdAtText: now.toLocaleString('en-ZA'),
-    orderType: 'USB TEST',
-    customerName: '',
-    tableNumber: '',
-    orderNote: 'POS-8360 USB printer test',
-    items: [{ id: 'test', name: 'Cappuccino', qty: 1, unitPrice: 32, selectedModifiers: [], note: '' }],
-    total: 32,
-  };
+  const order = { number: 'TEST', createdAt: now.toISOString(), createdAtText: now.toLocaleString('en-ZA'), orderType: 'USB TEST', customerName: '', tableNumber: '', orderNote: 'POS-8360 USB printer test', items: [{ id: 'test', name: 'Cappuccino', qty: 1, unitPrice: 32, selectedModifiers: [], note: '' }], total: 32 };
   return printOrderSlip(order, settings);
 }

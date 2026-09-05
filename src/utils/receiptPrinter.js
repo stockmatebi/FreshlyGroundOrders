@@ -118,10 +118,17 @@ export function barcodeValue(order, receipt = {}) {
   return { prefix, amount, display: `${prefix}  ${amount}` };
 }
 
-function buildCode128WithEnter(prefix, amount) {
-  // IQ Retail keyboard sequence:
-  //   31010001 -> Enter (description) -> Enter (unit price) -> amount -> Enter (accept)
-  const data = `{B${prefix}{A\r\r{B${amount}{A\r`;
+function buildCode128ForIqRetail(prefix, amount) {
+  // IQ Retail line-entry navigation:
+  // 1) stock code + Enter opens the item/description
+  // 2) use Tab navigation rather than a second Enter, because a second Enter can
+  //    commit/advance the line and leave the scanned amount in the Markup field
+  // 3) Description -> Type -> Unit Price = two Tabs
+  // 4) type the numerical total and Enter to accept it
+  //
+  // Using Tabs also avoids relying on IQ Retail's variable processing time between
+  // consecutive Enter keys.
+  const data = `{B${prefix}{A\r\t\t{B${amount}{A\r`;
   const GS = '\x1d';
   const ESC = '\x1b';
   return (
@@ -205,7 +212,7 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
   if (receipt.showBarcode !== false) {
     const { prefix, amount, display } = barcodeValue(order, receipt);
     if (typeof USBPrinter.printText === 'function') {
-      await Promise.resolve(USBPrinter.printText(buildCode128WithEnter(prefix, amount)));
+      await Promise.resolve(USBPrinter.printText(buildCode128ForIqRetail(prefix, amount)));
       await Promise.resolve(USBPrinter.printText(center(display) + '\n'));
     }
   }

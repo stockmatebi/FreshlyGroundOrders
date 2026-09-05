@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const STORAGE_KEYS = {
-  menu: 'FGE_MENU_V2',
+  menu: 'FGE_MENU_V3',
   orders: 'FGE_ORDERS_V2',
   settings: 'FGE_SETTINGS_V2',
 };
@@ -22,7 +22,7 @@ export async function saveJson(key, value) {
 
 export async function exportBackupPayload(menu, orders, settings) {
   return JSON.stringify({
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     menu,
     orders,

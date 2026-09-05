@@ -71,9 +71,6 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     lines.push('');
   }
 
-  // Always print the business name as a readable fallback underneath the graphic logo.
-  // That way the receipt still has a proper branded header even if a particular
-  // ESC/POS printer ignores bitmap-image commands.
   lines.push(center(large(bold(receipt.businessName || 'FRESHLY GROUND EXPRESS'))));
   if (receipt.headerLine1) lines.push(center(receipt.headerLine1));
   if (receipt.headerLine2) lines.push(center(receipt.headerLine2));
@@ -122,10 +119,9 @@ export function barcodeValue(order, receipt = {}) {
 }
 
 function buildCode128WithEnter(prefix, amount) {
-  // Code 128 payload:
-  //   31010001 -> Enter -> numeric total -> Enter
-  // The final Enter commits the amount in the till after the barcode scanner types it.
-  const data = `{B${prefix}{A\r{B${amount}{A\r`;
+  // IQ Retail keyboard sequence:
+  //   31010001 -> Enter (description) -> Enter (unit price) -> amount -> Enter (accept)
+  const data = `{B${prefix}{A\r\r{B${amount}{A\r`;
   const GS = '\x1d';
   const ESC = '\x1b';
   return (
@@ -174,11 +170,7 @@ async function connect(printer) {
 
 async function printReceiptLogo(USBPrinter) {
   if (typeof USBPrinter.printImageBase64 !== 'function') return false;
-
   try {
-    // Keep the bitmap comfortably below the 80 mm printhead width and explicitly
-    // request centred alignment. The library's Android USB path decodes this Base64
-    // PNG natively before converting it to ESC/POS raster data.
     const cleanBase64 = String(receiptLogoBase64 || '').replace(/\s+/g, '');
     await Promise.resolve(
       USBPrinter.printImageBase64(cleanBase64, {

@@ -2,22 +2,13 @@
   "expo": {
     "name": "Freshly Ground Orders",
     "slug": "freshly-ground-orders",
-    "version": "2.1.6",
+    "version": "2.2.0",
     "orientation": "landscape",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
-    "plugins": [
-      "./plugins/withFreshlyGroundIcon"
-    ],
-    "android": {
-      "package": "com.freshlyground.orders",
-      "versionCode": 8
-    },
+    "plugins": ["./plugins/withFreshlyGroundIcon"],
+    "android": {"package": "com.freshlyground.orders", "versionCode": 9},
     "owner": "megastockmate",
-    "extra": {
-      "eas": {
-        "projectId": "c73103b6-68d5-48da-926d-be6098bae96e"
-      }
-    }
+    "extra": {"eas": {"projectId": "c73103b6-68d5-48da-926d-be6098bae96e"}}
   }
 }

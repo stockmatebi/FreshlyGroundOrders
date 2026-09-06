@@ -1,12 +1,184 @@
-import React,{useMemo,useState}from'react';import{Alert,Modal,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View,useWindowDimensions}from'react-native';import{formatMoney,printOrderSlip}from'../utils/receiptPrinter';import{localDateKey}from'../utils/reports';import{theme}from'../theme';
-const uid=(p='id')=>`${p}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
-export function NewOrderScreen({menu,onSaveMenu,settings,onSaveSettings,loyalty,onOrderSaved,getNextOrderNumber}){const{width}=useWindowDimensions(),land=width>=800;const sections=useMemo(()=>menu.filter(s=>(s.items||[]).some(i=>i.active)),[menu]);const[sectionId,setSectionId]=useState(sections[0]?.id||''),[cart,setCart]=useState([]),[orderType,setOrderType]=useState('Takeaway'),[customerName,setCustomerName]=useState(''),[phone,setPhone]=useState(''),[program,setProgram]=useState(''),[table,setTable]=useState(''),[note,setNote]=useState(''),[specialOpen,setSpecialOpen]=useState(false),[specialText,setSpecialText]=useState(settings.weekdaySpecial?.description||'');const section=sections.find(s=>s.id===sectionId)||sections[0];const all=menu.flatMap(s=>(s.items||[]).map(i=>({...i,sectionId:s.id})));const quick=(settings.quickItemIds||[]).map(id=>all.find(i=>i.id===id)).filter(Boolean);const total=useMemo(()=>cart.reduce((s,i)=>s+i.qty*(Number(i.unitPrice||0)+(i.selectedModifiers||[]).reduce((x,m)=>x+Number(m.price||0),0)),0),[cart]);
-function add(i){if(i.soldOut)return;setCart(v=>{const x=v.findIndex(a=>a.id===i.id&&!a.note);if(x>=0)return v.map((a,n)=>n===x?{...a,qty:a.qty+1}:a);return[...v,{lineId:uid('line'),id:i.id,name:i.id==='weekday-special-r50'?(settings.weekdaySpecial?.description||i.name):i.name,qty:1,unitPrice:Number(i.price||0),selectedModifiers:[],note:''}]})}
-function sold(i){Alert.alert(i.soldOut?'Mark available?':'Mark sold out?',i.name,[{text:'Cancel'},{text:i.soldOut?'AVAILABLE':'SOLD OUT',onPress:()=>onSaveMenu(menu.map(s=>({...s,items:(s.items||[]).map(x=>x.id===i.id?{...x,soldOut:!x.soldOut}:x)})))}])}
-async function save(){if(!cart.length)return Alert.alert('Empty order','Add at least one item.');if(program&&!phone.trim())return Alert.alert('Loyalty phone required','Enter the customer phone number for loyalty.');const now=new Date();const order={id:uid('order'),number:getNextOrderNumber(now),dayKey:localDateKey(now),createdAt:now.toISOString(),createdAtText:now.toLocaleString('en-ZA'),orderType,customerName:customerName.trim(),tableNumber:table.trim(),orderNote:note.trim(),items:cart,total,loyalty:program?{program,phone:phone.trim()}:null};await onOrderSaved(order);await printOrderSlip(order,settings);setCart([]);setCustomerName('');setPhone('');setProgram('');setTable('');setNote('')}
-async function saveSpecial(){await onSaveSettings({...settings,weekdaySpecial:{...settings.weekdaySpecial,description:specialText.trim()||"Today's R50 Weekday Special"}});setSpecialOpen(false)}
-const stamp=phone.trim()?loyalty[phone.replace(/\s/g,'')]:null;
-const menuPane=<><View style={s.quickWrap}><View style={s.quickHead}><Text style={s.quickTitle}>QUICK PICKS</Text><TouchableOpacity onPress={()=>setSpecialOpen(true)}><Text style={s.specialEdit}>EDIT R50 SPECIAL</Text></TouchableOpacity></View><ScrollView horizontal showsHorizontalScrollIndicator={false}>{quick.map(i=><TouchableOpacity key={i.id} disabled={i.soldOut} onPress={()=>add(i)} onLongPress={()=>sold(i)} style={[s.quick,i.soldOut&&s.out]}><Text style={s.quickName}>{i.name}</Text><Text style={s.quickPrice}>{formatMoney(i.price)}</Text></TouchableOpacity>)}</ScrollView></View><View style={s.typeRow}>{['Takeaway','Sit-down'].map(t=><TouchableOpacity key={t} onPress={()=>setOrderType(t)} style={[s.type,orderType===t&&s.typeA]}><Text style={s.typeT}>{t}</Text></TouchableOpacity>)}</View><View style={s.fields}><TextInput style={s.input} placeholder="Customer name" value={customerName} onChangeText={setCustomerName}/><TextInput style={s.input} placeholder="Phone / loyalty no." keyboardType="phone-pad" value={phone} onChangeText={setPhone}/><TextInput style={s.input} placeholder="Table" value={table} onChangeText={setTable}/></View><View style={s.loyaltyRow}><Text style={s.loyaltyLabel}>LOYALTY:</Text>{['Coffee','Meal'].map(p=><TouchableOpacity key={p} onPress={()=>setProgram(program===p?'':p)} style={[s.loyaltyBtn,program===p&&s.loyaltyA]}><Text style={s.loyaltyTxt}>{p}{stamp?` ${stamp[p.toLowerCase()]||0}/10`:''}</Text></TouchableOpacity>)}</View><Text style={s.sectionTitle}>{section?.name||'Menu'}</Text><View style={s.grid}>{(section?.items||[]).filter(i=>i.active).map(i=><TouchableOpacity key={i.id} disabled={i.soldOut} onPress={()=>add(i)} onLongPress={()=>sold(i)} style={[s.item,land&&s.itemLand,i.soldOut&&s.out]}><Text style={s.itemName}>{i.id==='weekday-special-r50'?(settings.weekdaySpecial?.description||i.name):i.name}</Text>{i.soldOut?<Text style={s.sold}>SOLD OUT</Text>:null}<Text style={s.price}>{formatMoney(i.price)}</Text></TouchableOpacity>)}</View><Text style={s.hint}>Hold any menu button to mark it SOLD OUT / AVAILABLE.</Text></>;
-const cartPane=<View style={s.cart}><Text style={s.cartTitle}>Current Order</Text>{cart.map(i=><View key={i.lineId} style={s.line}><Text style={s.lineName}>{i.qty} x {i.name}</Text><Text style={s.linePrice}>{formatMoney(i.qty*i.unitPrice)}</Text><View style={s.qty}><TouchableOpacity onPress={()=>setCart(v=>v.map(x=>x.lineId===i.lineId?{...x,qty:x.qty-1}:x).filter(x=>x.qty>0))}><Text style={s.qb}> - </Text></TouchableOpacity><TouchableOpacity onPress={()=>setCart(v=>v.map(x=>x.lineId===i.lineId?{...x,qty:x.qty+1}:x))}><Text style={s.qb}> + </Text></TouchableOpacity></View></View>)}<TextInput style={s.note} placeholder="General order note" value={note} onChangeText={setNote}/><View style={s.total}><Text style={s.totalT}>TOTAL</Text><Text style={s.totalT}>{formatMoney(total)}</Text></View><TouchableOpacity style={s.print} onPress={save}><Text style={s.printT}>SAVE & PRINT ORDER</Text></TouchableOpacity></View>;
-return <View style={{flex:1}}><ScrollView horizontal style={s.cats}>{sections.map(x=><TouchableOpacity key={x.id} onPress={()=>setSectionId(x.id)} style={[s.cat,section?.id===x.id&&s.catA]}><Text style={s.catT}>{x.name}</Text></TouchableOpacity>)}</ScrollView>{land?<View style={s.body}><ScrollView style={{flex:1.65}} contentContainerStyle={s.pad}>{menuPane}</ScrollView><ScrollView style={{flex:1}} contentContainerStyle={s.pad}>{cartPane}</ScrollView></View>:<ScrollView contentContainerStyle={s.pad}>{menuPane}{cartPane}</ScrollView>}<Modal visible={specialOpen} transparent animationType="fade"><View style={s.back}><View style={s.modal}><Text style={s.modalTitle}>Today's R50 Weekday Special</Text><TextInput autoFocus style={s.specialInput} value={specialText} onChangeText={setSpecialText} placeholder="e.g. Chicken Curry & Rice"/><View style={s.actions}><TouchableOpacity onPress={()=>setSpecialOpen(false)} style={s.cancel}><Text>Cancel</Text></TouchableOpacity><TouchableOpacity onPress={saveSpecial} style={s.save}><Text style={{color:'#fff',fontWeight:'900'}}>SAVE SPECIAL</Text></TouchableOpacity></View></View></View></Modal></View>}
-const c=theme.colors,s=StyleSheet.create({cats:{maxHeight:54,backgroundColor:c.bg},cat:{padding:12,margin:5,borderRadius:20,backgroundColor:'#3A3029'},catA:{backgroundColor:c.green},catT:{color:'#fff',fontWeight:'800'},body:{flex:1,flexDirection:'row',gap:10,padding:10},pad:{padding:10,paddingBottom:25},quickWrap:{backgroundColor:c.surface,padding:10,borderRadius:14,marginBottom:10},quickHead:{flexDirection:'row',justifyContent:'space-between'},quickTitle:{fontWeight:'900',color:c.greenDark},specialEdit:{fontWeight:'900',color:c.red},quick:{padding:11,minWidth:130,marginRight:8,marginTop:8,borderRadius:12,backgroundColor:c.espresso},quickName:{color:'#fff',fontWeight:'900'},quickPrice:{color:'#fff',marginTop:3},typeRow:{flexDirection:'row',gap:8},type:{flex:1,padding:10,borderRadius:10,backgroundColor:c.surface},typeA:{backgroundColor:c.green},typeT:{textAlign:'center',fontWeight:'900'},fields:{flexDirection:'row',gap:8,marginTop:8},input:{flex:1,backgroundColor:'#fff',padding:10,borderRadius:10,borderWidth:1,borderColor:c.line},loyaltyRow:{flexDirection:'row',alignItems:'center',gap:8,marginVertical:9},loyaltyLabel:{fontWeight:'900'},loyaltyBtn:{padding:9,borderRadius:10,backgroundColor:c.surface},loyaltyA:{backgroundColor:c.green},loyaltyTxt:{fontWeight:'900'},sectionTitle:{fontSize:21,fontWeight:'900',color:c.greenDark,marginVertical:8},grid:{flexDirection:'row',flexWrap:'wrap',gap:9},item:{width:'48%',minHeight:90,padding:12,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.line},itemLand:{width:'31.8%'},itemName:{fontWeight:'900',fontSize:15,color:c.ink},price:{marginTop:'auto',fontWeight:'900',fontSize:16,color:c.red},sold:{color:c.red,fontWeight:'900'},out:{opacity:.45},hint:{color:c.muted,fontSize:11,marginTop:8},cart:{backgroundColor:c.espresso,padding:13,borderRadius:16},cartTitle:{color:'#fff',fontSize:20,fontWeight:'900'},line:{backgroundColor:'#fff',padding:10,borderRadius:10,marginTop:8},lineName:{fontWeight:'900'},linePrice:{color:c.green,fontWeight:'900'},qty:{flexDirection:'row',gap:10,marginTop:6},qb:{backgroundColor:c.red,color:'#fff',padding:5,borderRadius:5,fontWeight:'900'},note:{backgroundColor:'#fff',padding:10,borderRadius:10,marginTop:10},total:{flexDirection:'row',justifyContent:'space-between',marginVertical:12},totalT:{color:'#fff',fontSize:21,fontWeight:'900'},print:{backgroundColor:c.red,padding:14,borderRadius:12},printT:{color:'#fff',textAlign:'center',fontWeight:'900'},back:{flex:1,backgroundColor:'rgba(0,0,0,.55)',justifyContent:'center',padding:20},modal:{backgroundColor:'#fff',padding:18,borderRadius:16,maxWidth:520,width:'100%',alignSelf:'center'},modalTitle:{fontSize:20,fontWeight:'900'},specialInput:{borderWidth:1,borderColor:c.line,padding:12,borderRadius:10,marginVertical:12},actions:{flexDirection:'row',gap:10},cancel:{flex:1,padding:12,backgroundColor:c.soft,borderRadius:10,alignItems:'center'},save:{flex:1,padding:12,backgroundColor:c.green,borderRadius:10,alignItems:'center'}});
+import React, { useMemo, useState } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { formatMoney, printOrderSlip } from '../utils/receiptPrinter';
+import { localDateKey } from '../utils/reports';
+import { normalizePhone } from '../utils/storage';
+import { theme } from '../theme';
+
+const uid = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const customerName = (customer) => `${customer?.firstName || ''} ${customer?.surname || ''}`.trim() || customer?.name || 'Unnamed customer';
+
+export function NewOrderScreen({ menu, onSaveMenu, settings, onSaveSettings, customers, onOrderSaved, getNextOrderNumber }) {
+  const { width } = useWindowDimensions();
+  const landscape = width >= 800;
+  const sections = useMemo(() => menu.filter((section) => (section.items || []).some((item) => item.active)), [menu]);
+  const [sectionId, setSectionId] = useState(sections[0]?.id || '');
+  const [cart, setCart] = useState([]);
+  const [orderType, setOrderType] = useState('Takeaway');
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [walkInName, setWalkInName] = useState('');
+  const [program, setProgram] = useState('');
+  const [table, setTable] = useState('');
+  const [note, setNote] = useState('');
+  const [specialOpen, setSpecialOpen] = useState(false);
+  const [specialText, setSpecialText] = useState(settings.weekdaySpecial?.description || '');
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+
+  const section = sections.find((item) => item.id === sectionId) || sections[0];
+  const allItems = menu.flatMap((sectionItem) => (sectionItem.items || []).map((item) => ({ ...item, sectionId: sectionItem.id })));
+  const quickItems = (settings.quickItemIds || []).map((id) => allItems.find((item) => item.id === id)).filter(Boolean);
+  const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId) || null;
+  const activeCustomers = useMemo(() => customers.filter((customer) => customer.active !== false), [customers]);
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return activeCustomers.slice(0, 30);
+    return activeCustomers.filter((customer) => customerName(customer).toLowerCase().includes(q) || String(customer.phone || '').toLowerCase().includes(q)).slice(0, 30);
+  }, [activeCustomers, customerSearch]);
+
+  const total = useMemo(() => cart.reduce((sum, item) => {
+    const modifiers = (item.selectedModifiers || []).reduce((modifierSum, modifier) => modifierSum + Number(modifier.price || 0), 0);
+    return sum + item.qty * (Number(item.unitPrice || 0) + modifiers);
+  }, 0), [cart]);
+
+  function add(item) {
+    if (item.soldOut) return;
+    setCart((current) => {
+      const index = current.findIndex((line) => line.id === item.id && !line.note && !(line.selectedModifiers || []).length);
+      if (index >= 0) return current.map((line, lineIndex) => lineIndex === index ? { ...line, qty: line.qty + 1 } : line);
+      return [...current, {
+        lineId: uid('line'),
+        id: item.id,
+        name: item.id === 'weekday-special-r50' ? (settings.weekdaySpecial?.description || item.name) : item.name,
+        qty: 1,
+        unitPrice: Number(item.price || 0),
+        selectedModifiers: [],
+        note: '',
+      }];
+    });
+  }
+
+  function toggleSoldOut(item) {
+    Alert.alert(item.soldOut ? 'Mark available?' : 'Mark sold out?', item.name, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: item.soldOut ? 'AVAILABLE' : 'SOLD OUT',
+        onPress: () => onSaveMenu(menu.map((sectionItem) => ({
+          ...sectionItem,
+          items: (sectionItem.items || []).map((menuItem) => menuItem.id === item.id ? { ...menuItem, soldOut: !menuItem.soldOut } : menuItem),
+        }))),
+      },
+    ]);
+  }
+
+  function chooseCustomer(customer) {
+    setSelectedCustomerId(customer.id);
+    setWalkInName('');
+    setCustomerOpen(false);
+    setCustomerSearch('');
+  }
+
+  function clearCustomer() {
+    setSelectedCustomerId(null);
+    setProgram('');
+  }
+
+  async function saveOrder() {
+    if (!cart.length) return Alert.alert('Empty order', 'Add at least one item.');
+    if (program && !selectedCustomer) return Alert.alert('Select a loyalty customer', 'Choose a customer from the customer database before adding a loyalty stamp.');
+
+    const now = new Date();
+    const order = {
+      id: uid('order'),
+      number: getNextOrderNumber(now),
+      dayKey: localDateKey(now),
+      createdAt: now.toISOString(),
+      createdAtText: now.toLocaleString('en-ZA'),
+      orderType,
+      customerId: selectedCustomer?.id || null,
+      customerName: selectedCustomer ? customerName(selectedCustomer) : walkInName.trim(),
+      customerPhone: selectedCustomer?.phone || '',
+      loyaltyProgram: program || null,
+      tableNumber: table.trim(),
+      orderNote: note.trim(),
+      items: cart,
+      total,
+    };
+
+    await onOrderSaved(order);
+    await printOrderSlip(order, settings);
+    setCart([]);
+    setSelectedCustomerId(null);
+    setWalkInName('');
+    setProgram('');
+    setTable('');
+    setNote('');
+  }
+
+  async function saveSpecial() {
+    await onSaveSettings({ ...settings, weekdaySpecial: { ...settings.weekdaySpecial, description: specialText.trim() || "Today's R50 Weekday Special" } });
+    setSpecialOpen(false);
+  }
+
+  const menuPane = <>
+    <View style={styles.quickWrap}>
+      <View style={styles.quickHeader}>
+        <Text style={styles.quickTitle}>QUICK PICKS</Text>
+        <TouchableOpacity onPress={() => setSpecialOpen(true)}><Text style={styles.specialEdit}>EDIT R50 SPECIAL</Text></TouchableOpacity>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        {quickItems.map((item) => <TouchableOpacity key={item.id} disabled={item.soldOut} onPress={() => add(item)} onLongPress={() => toggleSoldOut(item)} style={[styles.quickItem, item.soldOut && styles.soldOutOpacity]}><Text style={styles.quickName}>{item.name}</Text><Text style={styles.quickPrice}>{formatMoney(item.price)}</Text></TouchableOpacity>)}
+      </ScrollView>
+    </View>
+
+    <View style={styles.typeRow}>{['Takeaway', 'Sit-down'].map((type) => <TouchableOpacity key={type} onPress={() => setOrderType(type)} style={[styles.typeButton, orderType === type && styles.typeButtonActive]}><Text style={[styles.typeText, orderType === type && styles.typeTextActive]}>{type}</Text></TouchableOpacity>)}</View>
+
+    <View style={styles.customerBar}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.customerBarLabel}>CUSTOMER</Text>
+        {selectedCustomer ? <><Text style={styles.customerBarName}>{customerName(selectedCustomer)}</Text><Text style={styles.customerBarPhone}>{selectedCustomer.phone}</Text></> : <Text style={styles.customerBarEmpty}>No loyalty customer selected</Text>}
+      </View>
+      {selectedCustomer ? <TouchableOpacity style={styles.clearCustomer} onPress={clearCustomer}><Text style={styles.clearCustomerText}>CLEAR</Text></TouchableOpacity> : null}
+      <TouchableOpacity style={styles.findCustomer} onPress={() => setCustomerOpen(true)}><Text style={styles.findCustomerText}>FIND CUSTOMER</Text></TouchableOpacity>
+    </View>
+
+    {!selectedCustomer ? <TextInput style={styles.walkInInput} placeholder="Walk-in customer name (optional)" placeholderTextColor={theme.colors.muted} value={walkInName} onChangeText={setWalkInName} /> : null}
+
+    <View style={styles.fieldsRow}><TextInput style={styles.input} placeholder="Table" placeholderTextColor={theme.colors.muted} value={table} onChangeText={setTable} /></View>
+
+    <View style={styles.loyaltyRow}>
+      <Text style={styles.loyaltyLabel}>LOYALTY:</Text>
+      {['Coffee', 'Meal'].map((type) => {
+        const count = selectedCustomer ? Number(selectedCustomer[type.toLowerCase()] || 0) : 0;
+        return <TouchableOpacity key={type} disabled={!selectedCustomer} onPress={() => setProgram(program === type ? '' : type)} style={[styles.loyaltyButton, !selectedCustomer && styles.loyaltyDisabled, program === type && styles.loyaltyActive]}><Text style={[styles.loyaltyText, program === type && styles.loyaltyTextActive]}>{type} {selectedCustomer ? `${count}/10` : ''}</Text></TouchableOpacity>;
+      })}
+      {selectedCustomer && (Number(selectedCustomer.coffee || 0) >= 10 || Number(selectedCustomer.meal || 0) >= 10) ? <Text style={styles.rewardReady}>FREE REWARD READY</Text> : null}
+    </View>
+
+    <Text style={styles.sectionTitle}>{section?.name || 'Menu'}</Text>
+    <View style={styles.grid}>{(section?.items || []).filter((item) => item.active).map((item) => <TouchableOpacity key={item.id} disabled={item.soldOut} onPress={() => add(item)} onLongPress={() => toggleSoldOut(item)} style={[styles.menuItem, landscape && styles.menuItemLandscape, item.soldOut && styles.soldOutOpacity]}><Text style={styles.itemName}>{item.id === 'weekday-special-r50' ? (settings.weekdaySpecial?.description || item.name) : item.name}</Text>{item.soldOut ? <Text style={styles.soldOut}>SOLD OUT</Text> : null}<Text style={styles.price}>{formatMoney(item.price)}</Text></TouchableOpacity>)}</View>
+    <Text style={styles.hint}>Hold any menu button to mark it SOLD OUT / AVAILABLE.</Text>
+  </>;
+
+  const cartPane = <View style={styles.cart}>
+    <Text style={styles.cartTitle}>Current Order</Text>
+    {cart.map((item) => <View key={item.lineId} style={styles.cartLine}><Text style={styles.cartLineName}>{item.qty} x {item.name}</Text><Text style={styles.cartLinePrice}>{formatMoney(item.qty * item.unitPrice)}</Text><View style={styles.qtyRow}><TouchableOpacity onPress={() => setCart((current) => current.map((line) => line.lineId === item.lineId ? { ...line, qty: line.qty - 1 } : line).filter((line) => line.qty > 0))}><Text style={styles.qtyButton}> - </Text></TouchableOpacity><TouchableOpacity onPress={() => setCart((current) => current.map((line) => line.lineId === item.lineId ? { ...line, qty: line.qty + 1 } : line))}><Text style={styles.qtyButton}> + </Text></TouchableOpacity></View></View>)}
+    <TextInput style={styles.note} placeholder="General order note" placeholderTextColor={theme.colors.muted} value={note} onChangeText={setNote} />
+    <View style={styles.totalRow}><Text style={styles.totalText}>TOTAL</Text><Text style={styles.totalText}>{formatMoney(total)}</Text></View>
+    <TouchableOpacity style={styles.printButton} onPress={saveOrder}><Text style={styles.printText}>SAVE & PRINT ORDER</Text></TouchableOpacity>
+  </View>;
+
+  return <View style={styles.root}>
+    <ScrollView horizontal style={styles.categories} showsHorizontalScrollIndicator={false}>{sections.map((item) => <TouchableOpacity key={item.id} onPress={() => setSectionId(item.id)} style={[styles.category, section?.id === item.id && styles.categoryActive]}><Text style={styles.categoryText}>{item.name}</Text></TouchableOpacity>)}</ScrollView>
+    {landscape ? <View style={styles.body}><ScrollView style={{ flex: 1.65 }} contentContainerStyle={styles.padding}>{menuPane}</ScrollView><ScrollView style={{ flex: 1 }} contentContainerStyle={styles.padding}>{cartPane}</ScrollView></View> : <ScrollView contentContainerStyle={styles.padding}>{menuPane}{cartPane}</ScrollView>}
+
+    <Modal visible={specialOpen} transparent animationType="fade" onRequestClose={() => setSpecialOpen(false)}><View style={styles.backdrop}><View style={styles.modal}><Text style={styles.modalTitle}>Today's R50 Weekday Special</Text><TextInput autoFocus style={styles.specialInput} value={specialText} onChangeText={setSpecialText} placeholder="e.g. Chicken Curry & Rice" /><View style={styles.actions}><TouchableOpacity onPress={() => setSpecialOpen(false)} style={styles.cancel}><Text>CANCEL</Text></TouchableOpacity><TouchableOpacity onPress={saveSpecial} style={styles.save}><Text style={styles.saveText}>SAVE SPECIAL</Text></TouchableOpacity></View></View></View></Modal>
+
+    <Modal visible={customerOpen} transparent animationType="fade" onRequestClose={() => setCustomerOpen(false)}><View style={styles.backdrop}><View style={[styles.modal, styles.customerModal]}><Text style={styles.modalTitle}>Find Customer</Text><TextInput autoFocus style={styles.specialInput} value={customerSearch} onChangeText={setCustomerSearch} placeholder="Search name or mobile number" placeholderTextColor={theme.colors.muted} /><ScrollView style={{ maxHeight: 380 }}>{filteredCustomers.map((customer) => <TouchableOpacity key={customer.id} style={styles.customerChoice} onPress={() => chooseCustomer(customer)}><View style={{ flex: 1 }}><Text style={styles.customerChoiceName}>{customerName(customer)}</Text><Text style={styles.customerChoicePhone}>{customer.phone}</Text></View><View style={styles.choiceLoyalty}><Text style={styles.choiceLoyaltyText}>Coffee {Number(customer.coffee || 0)}/10</Text><Text style={styles.choiceLoyaltyText}>Meal {Number(customer.meal || 0)}/10</Text></View></TouchableOpacity>)}{!filteredCustomers.length ? <Text style={styles.noCustomers}>No matching customer. Add them from the Customers tab first.</Text> : null}</ScrollView><TouchableOpacity onPress={() => setCustomerOpen(false)} style={styles.cancelFull}><Text style={styles.cancelFullText}>CLOSE</Text></TouchableOpacity></View></View></Modal>
+  </View>;
+}
+
+const c = theme.colors;
+const styles = StyleSheet.create({
+  root:{flex:1},categories:{maxHeight:54,backgroundColor:c.bg},category:{padding:12,margin:5,borderRadius:20,backgroundColor:'#3A3029'},categoryActive:{backgroundColor:c.green},categoryText:{color:'#fff',fontWeight:'800'},body:{flex:1,flexDirection:'row',gap:10,padding:10},padding:{padding:10,paddingBottom:25},quickWrap:{backgroundColor:c.surface,padding:10,borderRadius:14,marginBottom:10},quickHeader:{flexDirection:'row',justifyContent:'space-between'},quickTitle:{fontWeight:'900',color:c.greenDark},specialEdit:{fontWeight:'900',color:c.red},quickItem:{padding:11,minWidth:130,marginRight:8,marginTop:8,borderRadius:12,backgroundColor:c.espresso},quickName:{color:'#fff',fontWeight:'900'},quickPrice:{color:'#fff',marginTop:3},typeRow:{flexDirection:'row',gap:8},typeButton:{flex:1,padding:10,borderRadius:10,backgroundColor:c.surface},typeButtonActive:{backgroundColor:c.green},typeText:{textAlign:'center',fontWeight:'900',color:c.ink},typeTextActive:{color:'#fff'},customerBar:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:'#fff',padding:10,borderRadius:12,borderWidth:1,borderColor:c.line,marginTop:9},customerBarLabel:{fontSize:10,fontWeight:'900',color:c.muted},customerBarName:{fontWeight:'900',fontSize:16,color:c.ink},customerBarPhone:{color:c.greenDark,fontWeight:'700'},customerBarEmpty:{color:c.muted},findCustomer:{backgroundColor:c.green,paddingHorizontal:12,paddingVertical:10,borderRadius:9},findCustomerText:{color:'#fff',fontWeight:'900'},clearCustomer:{backgroundColor:c.soft,paddingHorizontal:9,paddingVertical:10,borderRadius:9},clearCustomerText:{color:c.red,fontWeight:'900'},walkInInput:{backgroundColor:'#fff',padding:10,borderRadius:10,borderWidth:1,borderColor:c.line,marginTop:8,color:c.ink},fieldsRow:{flexDirection:'row',gap:8,marginTop:8},input:{flex:1,backgroundColor:'#fff',padding:10,borderRadius:10,borderWidth:1,borderColor:c.line,color:c.ink},loyaltyRow:{flexDirection:'row',alignItems:'center',gap:8,marginVertical:9,flexWrap:'wrap'},loyaltyLabel:{fontWeight:'900',color:c.ink},loyaltyButton:{padding:9,borderRadius:10,backgroundColor:c.surface,borderWidth:1,borderColor:c.line},loyaltyDisabled:{opacity:.4},loyaltyActive:{backgroundColor:c.green,borderColor:c.green},loyaltyText:{fontWeight:'900',color:c.ink},loyaltyTextActive:{color:'#fff'},rewardReady:{color:c.red,fontWeight:'900'},sectionTitle:{fontSize:21,fontWeight:'900',color:c.greenDark,marginVertical:8},grid:{flexDirection:'row',flexWrap:'wrap',gap:9},menuItem:{width:'48%',minHeight:90,padding:12,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.line},menuItemLandscape:{width:'31.8%'},itemName:{fontWeight:'900',fontSize:15,color:c.ink},price:{marginTop:'auto',fontWeight:'900',fontSize:16,color:c.red},soldOut:{color:c.red,fontWeight:'900'},soldOutOpacity:{opacity:.45},hint:{color:c.muted,fontSize:11,marginTop:8},cart:{backgroundColor:c.espresso,padding:13,borderRadius:16},cartTitle:{color:'#fff',fontSize:20,fontWeight:'900'},cartLine:{backgroundColor:'#fff',padding:10,borderRadius:10,marginTop:8},cartLineName:{fontWeight:'900',color:c.ink},cartLinePrice:{color:c.green,fontWeight:'900'},qtyRow:{flexDirection:'row',gap:10,marginTop:6},qtyButton:{backgroundColor:c.red,color:'#fff',padding:5,borderRadius:5,fontWeight:'900'},note:{backgroundColor:'#fff',padding:10,borderRadius:10,marginTop:10,color:c.ink},totalRow:{flexDirection:'row',justifyContent:'space-between',marginVertical:12},totalText:{color:'#fff',fontSize:21,fontWeight:'900'},printButton:{backgroundColor:c.red,padding:14,borderRadius:12},printText:{color:'#fff',textAlign:'center',fontWeight:'900'},backdrop:{flex:1,backgroundColor:'rgba(0,0,0,.55)',justifyContent:'center',padding:20},modal:{backgroundColor:'#fff',padding:18,borderRadius:16,maxWidth:520,width:'100%',alignSelf:'center'},customerModal:{maxWidth:650},modalTitle:{fontSize:20,fontWeight:'900',color:c.ink},specialInput:{borderWidth:1,borderColor:c.line,padding:12,borderRadius:10,marginVertical:12,color:c.ink},actions:{flexDirection:'row',gap:10},cancel:{flex:1,padding:12,backgroundColor:c.soft,borderRadius:10,alignItems:'center'},save:{flex:1,padding:12,backgroundColor:c.green,borderRadius:10,alignItems:'center'},saveText:{color:'#fff',fontWeight:'900'},customerChoice:{flexDirection:'row',alignItems:'center',gap:10,padding:12,borderWidth:1,borderColor:c.line,borderRadius:11,marginBottom:8},customerChoiceName:{fontSize:16,fontWeight:'900',color:c.ink},customerChoicePhone:{color:c.greenDark,fontWeight:'700',marginTop:2},choiceLoyalty:{alignItems:'flex-end'},choiceLoyaltyText:{fontWeight:'800',color:c.muted,fontSize:12},noCustomers:{color:c.muted,textAlign:'center',padding:20},cancelFull:{backgroundColor:c.soft,padding:12,borderRadius:10,marginTop:8},cancelFullText:{textAlign:'center',fontWeight:'900',color:c.ink},
+});

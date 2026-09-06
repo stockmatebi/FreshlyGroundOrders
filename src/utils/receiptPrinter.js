@@ -48,8 +48,8 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     lines.push(doubleHeight(bold(`${qty} x ${item.name}${price}`)));
     (item.selectedModifiers || []).forEach((mod) => {
       const modifierLineTotal = qty * Number(mod.price || 0);
-      const modPrice = receipt.showPrices === false ? '' : ` +${formatMoney(modifierLineTotal)}`;
-      lines.push(bold(`   + ${mod.name}${modPrice}`));
+      const modPrice = receipt.showPrices === false || modifierLineTotal === 0 ? '' : ` +${formatMoney(modifierLineTotal)}`;
+      lines.push(bold(`   • ${mod.name}${modPrice}`));
     });
     if (receipt.showNotes !== false && item.note) lines.push(bold(`   NOTE: ${item.note}`));
   });
@@ -57,22 +57,21 @@ export function buildSlipText(order, receipt = {}, options = {}) {
   lines.push(''); lines.push(hr());
   if (receipt.showTotal !== false) lines.push(center(large(bold(`TOTAL: ${formatMoney(order.total)}`))));
   lines.push(hr());
+  if (order.loyaltyProgram) lines.push(center(`LOYALTY: +1 ${String(order.loyaltyProgram).toUpperCase()} POINT`));
   if (receipt.footer) lines.push(center(receipt.footer));
   return lines.join('\n') + '\n';
 }
 
 export function barcodeValue(order, receipt = {}) {
   const prefix = String(receipt.barcodePrefix || '31010001').replace(/\D/g, '') || '31010001';
-  const amount = Number(order?.total || 0).toFixed(2);
-  return { prefix, amount };
+  return { prefix };
 }
 
-function buildIqRetailCode128(prefix, amount) {
+function buildIqRetailCode128(prefix) {
   const GS = '\x1d';
   const ESC = '\x1b';
-  // One Code 128 symbol: stock code, keyboard Enter (CR), then the sale total.
-  // The scanner's configured suffix supplies the final Enter after the barcode.
-  const encoded = `{B${String(prefix)}{A\r{B${String(amount)}`;
+  const encoded = `{B${String(prefix)}`;
+  // Plain Code 128 stock code only. No total, Enter or Tab is embedded.
   return `${ESC}a\x01${GS}H\x02${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`;
 }
 
@@ -121,12 +120,35 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
   else throw new Error('USB print function is unavailable in this build.');
 
   if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') {
-    const { prefix, amount } = barcodeValue(order, receipt);
+    const { prefix } = barcodeValue(order, receipt);
     await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL')) + '\n'));
-    await Promise.resolve(USBPrinter.printText(buildIqRetailCode128(prefix, amount)));
-    await Promise.resolve(USBPrinter.printText(center(`${prefix}  ${amount}`) + '\n'));
+    await Promise.resolve(USBPrinter.printText(buildIqRetailCode128(prefix)));
   }
   if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));
+}
+
+async function printLoyaltyRewardSlip(USBPrinter, reward, receipt) {
+  if (!reward) return;
+  if (receipt.showLogo !== false) await printReceiptLogo(USBPrinter);
+  const lines = [
+    center(large(bold('LOYALTY REWARD'))),
+    center(bold('10 PURCHASES COMPLETED')),
+    '',
+    hr(),
+    reward.customerName ? center(doubleHeight(bold(reward.customerName))) : '',
+    center(doubleHeight(`${String(reward.program || '').toUpperCase()} REWARD`)),
+    '',
+    center(large(bold(`CLAIM UP TO ${formatMoney(reward.value)}`))),
+    '',
+    center('Present this slip when claiming your reward.'),
+    center('One reward claim per completed loyalty cycle.'),
+    hr(),
+    center('FRESHLY GROUND EXPRESS'),
+    '',
+  ].filter((line) => line !== null);
+
+  if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(lines.join('\n') + '\n'));
+  if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: true, tailingLine: true, encoding: 'UTF-8' }));
 }
 
 export async function printOrderSlip(order, settings, options = {}) {
@@ -137,7 +159,8 @@ export async function printOrderSlip(order, settings, options = {}) {
     const USBPrinter = await connect(printer);
     await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
     await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
-    return { printed: true, copies: 2 };
+    if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
+    return { printed: true, copies: order.loyaltyReward ? 3 : 2 };
   } catch (error) {
     console.warn('USB print failed:', error?.message || error);
     Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.');

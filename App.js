@@ -15,151 +15,17 @@ import { applyLoyaltyToCustomer } from './src/utils/loyalty';
 import { localDateKey } from './src/utils/reports';
 import { theme } from './src/theme';
 
-export default function App() {
-  return <AppErrorBoundary><SafeAreaProvider><AppShell /></SafeAreaProvider></AppErrorBoundary>;
-}
-
-function AppShell() {
-  const [tab, setTab] = useState('new');
-  const [menu, setMenu] = useState(defaultMenu);
-  const [orders, setOrders] = useState([]);
-  const [settings, setSettings] = useState(defaultSettings);
-  const [customers, setCustomers] = useState([]);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => { loadData(); }, []);
-
-  async function loadData() {
-    try {
-      const nextMenu = normalizeMenu(await loadJson(STORAGE_KEYS.menu, defaultMenu));
-      const nextOrders = await loadJson(STORAGE_KEYS.orders, []);
-      const nextSettings = mergeSettings(await loadJson(STORAGE_KEYS.settings, defaultSettings));
-      let nextCustomers = await loadJson(STORAGE_KEYS.customers, null);
-
-      if (!Array.isArray(nextCustomers)) {
-        const oldLoyalty = await loadJson(STORAGE_KEYS.loyalty, {});
-        nextCustomers = migrateLoyaltyToCustomers(oldLoyalty);
-        await saveJson(STORAGE_KEYS.customers, nextCustomers);
-      }
-
-      setMenu(nextMenu);
-      setOrders(Array.isArray(nextOrders) ? nextOrders : []);
-      setSettings(nextSettings);
-      setCustomers(nextCustomers);
-      await saveAutomaticBackup(nextMenu, Array.isArray(nextOrders) ? nextOrders : [], nextSettings, nextCustomers);
-    } catch (error) {
-      console.error('Startup load error', error);
-      Alert.alert('Load error', 'Saved data could not be loaded.');
-    } finally {
-      setReady(true);
-    }
-  }
-
-  async function saveMenu(value) {
-    const next = normalizeMenu(value);
-    setMenu(next);
-    await saveJson(STORAGE_KEYS.menu, next);
-  }
-
-  async function saveSettings(value) {
-    const next = mergeSettings(value);
-    setSettings(next);
-    await saveJson(STORAGE_KEYS.settings, next);
-  }
-
-  async function saveCustomers(value) {
-    const next = Array.isArray(value) ? value : [];
-    setCustomers(next);
-    await saveJson(STORAGE_KEYS.customers, next);
-  }
-
-  async function addOrder(order) {
-    const nextOrders = [order, ...orders];
-    setOrders(nextOrders);
-    await saveJson(STORAGE_KEYS.orders, nextOrders);
-
-    let loyaltyReward = null;
-    if (order.customerId) {
-      const now = new Date().toISOString();
-      const nextCustomers = customers.map((customer) => {
-        if (customer.id !== order.customerId) return customer;
-        const loyaltyResult = applyLoyaltyToCustomer(customer, order);
-        loyaltyReward = loyaltyResult.reward || null;
-        return {
-          ...loyaltyResult.customer,
-          totalVisits: Number(customer.totalVisits || 0) + 1,
-          lastVisitAt: now,
-          updatedAt: now,
-        };
-      });
-      setCustomers(nextCustomers);
-      await saveJson(STORAGE_KEYS.customers, nextCustomers);
-    }
-
-    return { loyaltyReward };
-  }
-
-  function getNextOrderNumber(now = new Date()) {
-    const key = localDateKey(now);
-    const count = orders.filter((order) => (order.dayKey || localDateKey(order.createdAt || now)) === key).length;
-    return String(count + 1).padStart(3, '0');
-  }
-
-  async function restoreBackup(payload) {
-    const nextMenu = normalizeMenu(payload.menu || defaultMenu);
-    const nextOrders = Array.isArray(payload.orders) ? payload.orders : [];
-    const nextSettings = mergeSettings(payload.settings || defaultSettings);
-    const nextCustomers = Array.isArray(payload.customers)
-      ? payload.customers
-      : migrateLoyaltyToCustomers(payload.loyalty || {});
-
-    setMenu(nextMenu);
-    setOrders(nextOrders);
-    setSettings(nextSettings);
-    setCustomers(nextCustomers);
-    await Promise.all([
-      saveJson(STORAGE_KEYS.menu, nextMenu),
-      saveJson(STORAGE_KEYS.orders, nextOrders),
-      saveJson(STORAGE_KEYS.settings, nextSettings),
-      saveJson(STORAGE_KEYS.customers, nextCustomers),
-    ]);
-    Alert.alert('Backup restored', 'Menu, settings, sales history and customer loyalty data have been restored.');
-  }
-
-  const content = useMemo(() => {
-    if (!ready) return <View style={styles.loading}><Text>Loading...</Text></View>;
-    if (tab === 'dashboard') return <DashboardScreen orders={orders} />;
-    if (tab === 'customers') return <CustomersScreen customers={customers} onSaveCustomers={saveCustomers} />;
-    if (tab === 'sales') return <OrdersScreen orders={orders} settings={settings} />;
-    if (tab === 'settings') return <SettingsScreen menu={menu} onSaveMenu={saveMenu} settings={settings} onSaveSettings={saveSettings} orders={orders} customers={customers} onRestoreBackup={restoreBackup} />;
-    return <NewOrderScreen menu={menu} onSaveMenu={saveMenu} settings={settings} onSaveSettings={saveSettings} customers={customers} onOrderSaved={addOrder} getNextOrderNumber={getNextOrderNumber} />;
-  }, [tab, menu, orders, settings, customers, ready]);
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" backgroundColor={theme.colors.espresso} />
-      <View style={styles.header}>
-        <View style={styles.logo}><Text style={styles.logoText}>FG</Text></View>
-        <View style={{ flex: 1 }}><Text style={styles.brand}>FRESHLY GROUND</Text><Text style={styles.express}>EXPRESS</Text></View>
-        <Text style={styles.usb}>{settings.printer ? 'USB READY' : 'USB SETUP'}</Text>
-      </View>
-      <View style={styles.body}>{content}</View>
-      <View style={styles.tabs}>
-        <Tab active={tab === 'new'} label="New Order" onPress={() => setTab('new')} />
-        <Tab active={tab === 'dashboard'} label="Dashboard" onPress={() => setTab('dashboard')} />
-        <Tab active={tab === 'customers'} label="Customers" onPress={() => setTab('customers')} />
-        <Tab active={tab === 'sales'} label="Sales" onPress={() => setTab('sales')} />
-        <Tab active={tab === 'settings'} label="Settings" onPress={() => setTab('settings')} />
-      </View>
-    </SafeAreaView>
-  );
-}
-
-function Tab({ active, label, onPress }) {
-  return <TouchableOpacity onPress={onPress} style={[styles.tab, active && styles.tabActive]}><Text style={styles.tabText}>{label}</Text></TouchableOpacity>;
-}
-
-const c = theme.colors;
-const styles = StyleSheet.create({
-  safeArea:{flex:1,backgroundColor:c.espresso},header:{minHeight:56,paddingHorizontal:10,paddingVertical:6,flexDirection:'row',alignItems:'center',gap:8,backgroundColor:c.espresso},logo:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},logoText:{color:'#fff',fontWeight:'900',fontSize:12},brand:{color:'#fff',fontWeight:'900',fontSize:15},express:{color:'#D75A50',fontWeight:'900',letterSpacing:2,fontSize:11},usb:{color:'#fff',backgroundColor:c.green,paddingHorizontal:8,paddingVertical:6,borderRadius:18,fontSize:8,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},tabs:{flexDirection:'row',gap:4,padding:5,backgroundColor:c.espresso},tab:{flex:1,paddingVertical:7,paddingHorizontal:3,borderRadius:8,alignItems:'center'},tabActive:{backgroundColor:c.green},tabText:{color:'#fff',fontWeight:'900',fontSize:10},loading:{flex:1,alignItems:'center',justifyContent:'center'},
-});
+export default function App(){return <AppErrorBoundary><SafeAreaProvider><AppShell/></SafeAreaProvider></AppErrorBoundary>}
+function AppShell(){
+ const[tab,setTab]=useState('new'),[menu,setMenu]=useState(defaultMenu),[orders,setOrders]=useState([]),[settings,setSettings]=useState(defaultSettings),[customers,setCustomers]=useState([]),[ready,setReady]=useState(false);
+ useEffect(()=>{loadData()},[]);
+ async function loadData(){try{const nextMenu=normalizeMenu(await loadJson(STORAGE_KEYS.menu,defaultMenu));const nextOrders=await loadJson(STORAGE_KEYS.orders,[]);const nextSettings=mergeSettings(await loadJson(STORAGE_KEYS.settings,defaultSettings));let nextCustomers=await loadJson(STORAGE_KEYS.customers,null);if(!Array.isArray(nextCustomers)){nextCustomers=migrateLoyaltyToCustomers(await loadJson(STORAGE_KEYS.loyalty,{}));await saveJson(STORAGE_KEYS.customers,nextCustomers)}setMenu(nextMenu);setOrders(Array.isArray(nextOrders)?nextOrders:[]);setSettings(nextSettings);setCustomers(nextCustomers);await saveAutomaticBackup(nextMenu,Array.isArray(nextOrders)?nextOrders:[],nextSettings,nextCustomers)}catch(e){Alert.alert('Load error','Saved data could not be loaded.')}finally{setReady(true)}}
+ async function saveMenu(v){const n=normalizeMenu(v);setMenu(n);await saveJson(STORAGE_KEYS.menu,n)} async function saveSettings(v){const n=mergeSettings(v);setSettings(n);await saveJson(STORAGE_KEYS.settings,n)} async function saveCustomers(v){const n=Array.isArray(v)?v:[];setCustomers(n);await saveJson(STORAGE_KEYS.customers,n)}
+ async function updateOrder(order){const n=orders.map(o=>o.id===order.id?order:o);setOrders(n);await saveJson(STORAGE_KEYS.orders,n)}
+ async function addOrder(order){order.status=order.status||'New';const n=[order,...orders];setOrders(n);await saveJson(STORAGE_KEYS.orders,n);let loyaltyReward=null;if(order.customerId){const now=new Date().toISOString();const nc=customers.map(c=>{if(c.id!==order.customerId)return c;const r=applyLoyaltyToCustomer(c,order);loyaltyReward=r.reward||null;return{...r.customer,totalVisits:Number(c.totalVisits||0)+1,lastVisitAt:now,updatedAt:now}});setCustomers(nc);await saveJson(STORAGE_KEYS.customers,nc)}return{loyaltyReward}}
+ function getNextOrderNumber(now=new Date()){const k=localDateKey(now);return String(orders.filter(o=>(o.dayKey||localDateKey(o.createdAt||now))===k).length+1).padStart(3,'0')}
+ async function restoreBackup(p){const nm=normalizeMenu(p.menu||defaultMenu),no=Array.isArray(p.orders)?p.orders:[],ns=mergeSettings(p.settings||defaultSettings),nc=Array.isArray(p.customers)?p.customers:migrateLoyaltyToCustomers(p.loyalty||{});setMenu(nm);setOrders(no);setSettings(ns);setCustomers(nc);await Promise.all([saveJson(STORAGE_KEYS.menu,nm),saveJson(STORAGE_KEYS.orders,no),saveJson(STORAGE_KEYS.settings,ns),saveJson(STORAGE_KEYS.customers,nc)]);Alert.alert('Backup restored','Menu, settings, sales history and customer loyalty data have been restored.')}
+ const content=useMemo(()=>{if(!ready)return <View style={styles.loading}><Text>Loading...</Text></View>;if(tab==='dashboard')return <DashboardScreen orders={orders}/>;if(tab==='customers')return <CustomersScreen customers={customers} onSaveCustomers={saveCustomers}/>;if(tab==='sales')return <OrdersScreen orders={orders} settings={settings} onUpdateOrder={updateOrder}/>;if(tab==='settings')return <SettingsScreen menu={menu} onSaveMenu={saveMenu} settings={settings} onSaveSettings={saveSettings} orders={orders} customers={customers} onRestoreBackup={restoreBackup}/>;return <NewOrderScreen menu={menu} onSaveMenu={saveMenu} settings={settings} onSaveSettings={saveSettings} customers={customers} orders={orders} onOrderSaved={addOrder} getNextOrderNumber={getNextOrderNumber}/>},[tab,menu,orders,settings,customers,ready]);
+ return <SafeAreaView style={styles.safeArea}><StatusBar style="light" backgroundColor={theme.colors.espresso}/><View style={styles.header}><View style={styles.logo}><Text style={styles.logoText}>FG</Text></View><View style={{flex:1}}><Text style={styles.brand}>FRESHLY GROUND</Text><Text style={styles.express}>EXPRESS</Text></View><Text style={styles.usb}>{settings.printer?'USB READY':'USB SETUP'}</Text></View><View style={styles.body}>{content}</View><View style={styles.tabs}><Tab active={tab==='new'} label="New Order" onPress={()=>setTab('new')}/><Tab active={tab==='dashboard'} label="Dashboard" onPress={()=>setTab('dashboard')}/><Tab active={tab==='customers'} label="Customers" onPress={()=>setTab('customers')}/><Tab active={tab==='sales'} label="Orders / Sales" onPress={()=>setTab('sales')}/><Tab active={tab==='settings'} label="Settings" onPress={()=>setTab('settings')}/></View></SafeAreaView>}
+function Tab({active,label,onPress}){return <TouchableOpacity onPress={onPress} style={[styles.tab,active&&styles.tabActive]}><Text style={styles.tabText}>{label}</Text></TouchableOpacity>}
+const c=theme.colors;const styles=StyleSheet.create({safeArea:{flex:1,backgroundColor:c.espresso},header:{minHeight:50,paddingHorizontal:9,paddingVertical:4,flexDirection:'row',alignItems:'center',gap:7,backgroundColor:c.espresso},logo:{width:32,height:32,borderRadius:16,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},logoText:{color:'#fff',fontWeight:'900',fontSize:11},brand:{color:'#fff',fontWeight:'900',fontSize:14},express:{color:'#D75A50',fontWeight:'900',letterSpacing:2,fontSize:10},usb:{color:'#fff',backgroundColor:c.green,paddingHorizontal:7,paddingVertical:5,borderRadius:15,fontSize:8,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},tabs:{flexDirection:'row',gap:3,padding:4,backgroundColor:c.espresso},tab:{flex:1,paddingVertical:6,paddingHorizontal:2,borderRadius:7,alignItems:'center'},tabActive:{backgroundColor:c.green},tabText:{color:'#fff',fontWeight:'900',fontSize:9},loading:{flex:1,alignItems:'center',justifyContent:'center'}});

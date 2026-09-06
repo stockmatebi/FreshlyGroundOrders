@@ -67,11 +67,13 @@ export function barcodeValue(order, receipt = {}) {
   return { prefix, amount };
 }
 
-function buildEscPosCode128(data) {
+function buildIqRetailCode128(prefix, amount) {
   const GS = '\x1d';
   const ESC = '\x1b';
-  const encoded = `{B${String(data)}`;
-  return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`;
+  // One Code 128 symbol: stock code, keyboard Enter (CR), then the sale total.
+  // The scanner's configured suffix supplies the final Enter after the barcode.
+  const encoded = `{B${String(prefix)}{A\r{B${String(amount)}`;
+  return `${ESC}a\x01${GS}H\x02${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`;
 }
 
 function normalizeUsbDevice(device, index) {
@@ -120,20 +122,9 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
 
   if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') {
     const { prefix, amount } = barcodeValue(order, receipt);
-
-    // Proven scanner behaviour from the IQ Retail test sheet:
-    // Code 128 code-only and amount-only barcodes scan reliably, and the scanners
-    // already append Enter after each barcode. Therefore do NOT embed CR/TAB
-    // characters inside either barcode. Scan the first barcode, wait for the item
-    // to load, then scan the second barcode. The scanner's normal suffix supplies
-    // the Enter between the two values and the final Enter after the amount.
-    await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL - SCAN 1')) + '\n'));
-    await Promise.resolve(USBPrinter.printText(buildEscPosCode128(prefix)));
-    await Promise.resolve(USBPrinter.printText(center(prefix) + '\n\n'));
-
-    await Promise.resolve(USBPrinter.printText(center(bold('WAIT FOR ITEM TO LOAD - THEN SCAN 2')) + '\n'));
-    await Promise.resolve(USBPrinter.printText(buildEscPosCode128(amount)));
-    await Promise.resolve(USBPrinter.printText(center(amount) + '\n'));
+    await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL')) + '\n'));
+    await Promise.resolve(USBPrinter.printText(buildIqRetailCode128(prefix, amount)));
+    await Promise.resolve(USBPrinter.printText(center(`${prefix}  ${amount}`) + '\n'));
   }
   if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));
 }

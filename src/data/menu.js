@@ -5,6 +5,10 @@ const eggsAndBread = [
     required: true,
     type: 'choice',
     options: [
+      { id: 'sunny-side-up', label: 'Sunny Side Up', priceDelta: 0 },
+      { id: 'soft', label: 'Soft', priceDelta: 0 },
+      { id: 'medium', label: 'Medium', priceDelta: 0 },
+      { id: 'hard', label: 'Hard', priceDelta: 0 },
       { id: 'fried', label: 'Fried', priceDelta: 0 },
       { id: 'scrambled', label: 'Scrambled', priceDelta: 0 },
       { id: 'poached', label: 'Poached', priceDelta: 0 },
@@ -98,11 +102,12 @@ export const defaultMenu = [
       { id: 'cappuccino-grande', name: 'Cappuccino Grande', description: '', price: 35, active: true, soldOut: false, sortOrder: 3, modifiers: ['extra-shot'], loyaltyPrograms: coffee },
       { id: 'flat-white', name: 'Flat White', description: '', price: 30, active: true, soldOut: false, sortOrder: 4, modifiers: ['extra-shot'], loyaltyPrograms: coffee },
       { id: 'latte', name: 'Latte', description: 'Choose Small / Medium / Large', price: 30, active: true, soldOut: false, sortOrder: 5, modifiers: ['extra-shot'], loyaltyPrograms: coffee, optionGroups: drinkSizes([30, 35, 40]) },
-      { id: 'milkshake', name: 'Milkshake', description: '', price: 40, active: true, soldOut: false, sortOrder: 6, modifiers: [] },
-      { id: 'deluxe-shake', name: 'Deluxe Shake', description: '', price: 45, active: true, soldOut: false, sortOrder: 7, modifiers: [] },
-      { id: 'filter-coffee', name: 'Coffee', description: 'Choose Small / Medium / Large', price: 25, active: true, soldOut: false, sortOrder: 8, modifiers: [], loyaltyPrograms: coffee, optionGroups: drinkSizes([25, 30, 40]) },
-      { id: 'tea', name: 'Tea', description: '', price: 20, active: true, soldOut: false, sortOrder: 9, modifiers: [] },
-      { id: 'hot-chocolate', name: 'Hot Chocolate', description: 'Choose Small / Medium / Large', price: 30, active: true, soldOut: false, sortOrder: 10, modifiers: [], loyaltyPrograms: coffee, optionGroups: drinkSizes([30, 35, 40]) },
+      { id: 'coffee', name: 'Coffee', description: 'Choose Small / Medium / Large', price: 25, active: true, soldOut: false, sortOrder: 6, modifiers: ['extra-shot'], loyaltyPrograms: coffee, optionGroups: drinkSizes([25, 30, 40]) },
+      { id: 'hot-chocolate', name: 'Hot Chocolate', description: 'Choose Small / Medium / Large', price: 30, active: true, soldOut: false, sortOrder: 7, modifiers: [], loyaltyPrograms: coffee, optionGroups: drinkSizes([30, 35, 40]) },
+      { id: 'milkshake', name: 'Milkshake', description: '', price: 40, active: true, soldOut: false, sortOrder: 8, modifiers: [] },
+      { id: 'deluxe-shake', name: 'Deluxe Shake', description: '', price: 45, active: true, soldOut: false, sortOrder: 9, modifiers: [] },
+      { id: 'filter-coffee', name: 'Filter Coffee', description: '', price: 15, active: true, soldOut: false, sortOrder: 10, modifiers: [], loyaltyPrograms: coffee },
+      { id: 'tea', name: 'Tea', description: '', price: 20, active: true, soldOut: false, sortOrder: 11, modifiers: [] },
     ],
   },
   {
@@ -114,37 +119,19 @@ export const defaultMenu = [
   },
 ];
 
-const defaultItemById = new Map(defaultMenu.flatMap((section) => section.items.map((item) => [item.id, item])));
-
 export function normalizeMenu(menu = []) {
   return menu.map((section, sectionIndex) => ({
     ...section,
     sortOrder: section.sortOrder ?? sectionIndex + 1,
-    items: (section.items || []).map((item, itemIndex) => {
-      const standard = defaultItemById.get(item.id) || {};
-      const structural = {
-        loyaltyPrograms: standard.loyaltyPrograms || [],
-        optionGroups: standard.optionGroups || [],
-      };
-      const forced = item.id === 'filter-coffee'
-        ? { name: 'Coffee', price: 25, description: 'Choose Small / Medium / Large' }
-        : item.id === 'latte'
-          ? { price: 30, description: 'Choose Small / Medium / Large' }
-          : item.id === 'hot-chocolate'
-            ? { price: 30, description: 'Choose Small / Medium / Large' }
-            : {};
-      return {
-        description: '',
-        active: true,
-        soldOut: false,
-        modifiers: [],
-        loyaltyPrograms: [],
-        optionGroups: [],
-        sortOrder: itemIndex + 1,
-        ...item,
-        ...structural,
-        ...forced,
-      };
-    }),
+    items: (section.items || []).map((item, itemIndex) => ({
+      description: '',
+      active: true,
+      soldOut: false,
+      modifiers: [],
+      loyaltyPrograms: [],
+      optionGroups: [],
+      sortOrder: itemIndex + 1,
+      ...item,
+    })),
   }));
 }

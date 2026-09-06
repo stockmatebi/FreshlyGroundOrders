@@ -7,7 +7,7 @@ import { theme } from '../theme';
 
 function uid(prefix) { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
 
-export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, orders, onRestoreBackup }) {
+export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, orders, customers, onRestoreBackup }) {
   const [printers, setPrinters] = useState([]);
   const [busyPrinter, setBusyPrinter] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -48,8 +48,25 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
   }
 
   function openItem(section, item = null) {
-    setEditingItem(item ? { ...item, sectionId: section.id, originalId: item.id, priceText: String(item.price ?? 0), modifiers: [...(item.modifiers || [])] } : {
-      isNew: true, sectionId: section.id, id: uid('item'), originalId: null, name: '', description: '', priceText: '0', active: true, soldOut: false, modifiers: [],
+    setEditingItem(item ? {
+      ...item,
+      sectionId: section.id,
+      originalId: item.id,
+      priceText: String(item.price ?? 0),
+      modifiers: [...(item.modifiers || [])],
+      loyaltyPrograms: [...(item.loyaltyPrograms || [])],
+    } : {
+      isNew: true,
+      sectionId: section.id,
+      id: uid('item'),
+      originalId: null,
+      name: '',
+      description: '',
+      priceText: '0',
+      active: true,
+      soldOut: false,
+      modifiers: [],
+      loyaltyPrograms: [],
     });
   }
 
@@ -66,6 +83,7 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
       active: editingItem.active !== false,
       soldOut: Boolean(editingItem.soldOut),
       modifiers: editingItem.modifiers || [],
+      loyaltyPrograms: editingItem.loyaltyPrograms || [],
       sortOrder: editingItem.sortOrder || 999,
     };
     const next = menu.map((s) => {
@@ -92,6 +110,18 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
     setEditingItem((current) => ({ ...current, modifiers: current.modifiers.includes(id) ? current.modifiers.filter((x) => x !== id) : [...current.modifiers, id] }));
   }
 
+  function toggleLoyaltyProgram(program) {
+    setEditingItem((current) => {
+      const currentPrograms = current?.loyaltyPrograms || [];
+      return {
+        ...current,
+        loyaltyPrograms: currentPrograms.includes(program)
+          ? currentPrograms.filter((value) => value !== program)
+          : [...currentPrograms, program],
+      };
+    });
+  }
+
   async function saveReceipt() {
     await onSaveSettings({ ...settings, receipt });
     Alert.alert('Saved', 'Till slip settings have been saved.');
@@ -108,7 +138,7 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
 
   async function backup() {
     try {
-      await shareBackup(await exportBackupPayload(menu, orders, { ...settings, receipt }));
+      await shareBackup(await exportBackupPayload(menu, orders, { ...settings, receipt }, customers));
     } catch (error) { Alert.alert('Backup failed', error?.message || 'Could not create backup.'); }
   }
 
@@ -138,13 +168,17 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
 
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderText}><Text style={styles.cardTitle}>Menu & Categories</Text><Text style={styles.help}>Add, edit, remove or temporarily sell out items.</Text></View>
+        <View style={styles.cardHeaderText}><Text style={styles.cardTitle}>Menu & Categories</Text><Text style={styles.help}>Add, edit, remove, sell out items and choose which items qualify for Coffee or Meal loyalty.</Text></View>
         <TouchableOpacity style={styles.smallAdd} onPress={() => setEditingCategory({ isNew: true, name: '' })}><Text style={styles.smallAddText}>+ CATEGORY</Text></TouchableOpacity>
       </View>
       {menu.map((section) => <View key={section.id} style={styles.section}>
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{section.name}</Text><View style={styles.inlineActions}><TouchableOpacity onPress={() => setEditingCategory({ id: section.id, name: section.name })}><Text style={styles.link}>Rename</Text></TouchableOpacity><TouchableOpacity onPress={() => deleteCategory(section)}><Text style={styles.dangerLink}>Delete</Text></TouchableOpacity></View></View>
         {(section.items || []).map((item) => <View key={item.id} style={styles.itemRow}>
-          <View style={{flex:1}}><Text style={styles.rowTitle}>{item.name}</Text><Text style={styles.small}>{formatMoney(item.price)}{item.description ? ` · ${item.description}` : ''}</Text></View>
+          <View style={{flex:1}}>
+            <Text style={styles.rowTitle}>{item.name}</Text>
+            <Text style={styles.small}>{formatMoney(item.price)}{item.description ? ` · ${item.description}` : ''}</Text>
+            {(item.loyaltyPrograms || []).length ? <View style={styles.loyaltyBadges}>{(item.loyaltyPrograms || []).map((program) => <Text key={program} style={styles.loyaltyBadge}>{program.toUpperCase()} LOYALTY</Text>)}</View> : null}
+          </View>
           <TouchableOpacity style={[styles.stockPill, item.soldOut && styles.stockPillOut]} onPress={() => toggleSoldOut(section.id, item.id)}><Text style={[styles.stockPillText, item.soldOut && styles.stockPillTextOut]}>{item.soldOut ? 'SOLD OUT' : 'AVAILABLE'}</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => openItem(section, item)}><Text style={styles.link}>Edit</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => deleteItem(section.id, item)}><Text style={styles.dangerLink}>×</Text></TouchableOpacity>
@@ -180,6 +214,14 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
       <Text style={styles.label}>Price</Text><TextInput keyboardType="decimal-pad" style={styles.textInput} value={editingItem?.priceText || ''} onChangeText={(priceText) => setEditingItem((x) => ({...x,priceText}))}/>
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Visible on menu</Text><Switch value={editingItem?.active !== false} onValueChange={(active) => setEditingItem((x) => ({...x,active}))}/></View>
       <View style={styles.switchRow}><Text style={styles.switchLabel}>Sold out</Text><Switch value={Boolean(editingItem?.soldOut)} onValueChange={(soldOut) => setEditingItem((x) => ({...x,soldOut}))}/></View>
+
+      <Text style={styles.modHeader}>Loyalty eligibility</Text>
+      <Text style={styles.help}>Select which loyalty card this item can earn a stamp on. An item can qualify for Coffee, Meal, both, or neither.</Text>
+      {['Coffee', 'Meal'].map((program) => {
+        const selected = (editingItem?.loyaltyPrograms || []).includes(program);
+        return <TouchableOpacity key={program} style={[styles.loyaltyChoice, selected && styles.loyaltyChoiceSelected]} onPress={() => toggleLoyaltyProgram(program)}><Text style={[styles.loyaltyChoiceText, selected && styles.loyaltyChoiceTextSelected]}>{selected ? '✓ ' : ''}{program} loyalty item</Text></TouchableOpacity>;
+      })}
+
       <Text style={styles.modHeader}>Optional modifiers / add-ons</Text><Text style={styles.help}>Select extras that should pop up when this item is ordered.</Text>
       {modifierChoices.filter((m) => m.id !== editingItem?.id).map((m) => { const selected=editingItem?.modifiers?.includes(m.id); return <TouchableOpacity key={m.id} style={[styles.modRow,selected&&styles.modRowSelected]} onPress={() => toggleModifier(m.id)}><Text style={[styles.modName,selected&&styles.modNameSelected]}>{selected?'✓ ':''}{m.name}</Text><Text style={[styles.modPrice,selected&&styles.modNameSelected]}>{m.categoryName} · {formatMoney(m.price)}</Text></TouchableOpacity>; })}
       <View style={styles.modalActions}><TouchableOpacity style={styles.lightButtonFlex} onPress={() => setEditingItem(null)}><Text style={styles.lightText}>Cancel</Text></TouchableOpacity><TouchableOpacity style={styles.primaryFlex} onPress={saveItem}><Text style={styles.primaryText}>SAVE ITEM</Text></TouchableOpacity></View>
@@ -189,5 +231,5 @@ export function SettingsScreen({ menu, onSaveMenu, settings, onSaveSettings, ord
 
 const c = theme.colors;
 const styles = StyleSheet.create({
-  container:{padding:14,paddingBottom:40},title:{fontSize:24,fontWeight:'900',color:c.ink,marginBottom:12},card:{backgroundColor:c.surface,borderRadius:16,padding:14,marginBottom:13,borderWidth:1,borderColor:c.line},cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',gap:8},cardHeaderText:{flex:1,minWidth:0,paddingRight:4},cardTitle:{fontSize:19,fontWeight:'900',color:c.greenDark},help:{color:c.muted,marginTop:3,marginBottom:10},small:{color:c.muted,fontSize:12,marginTop:2},primaryButton:{backgroundColor:c.red,borderRadius:12,padding:12,marginTop:9},darkButton:{backgroundColor:c.espresso,borderRadius:12,padding:12,marginTop:9},primaryText:{color:'#fff',textAlign:'center',fontWeight:'900'},printerRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:11,borderRadius:10,backgroundColor:c.bg,marginTop:8,borderWidth:1,borderColor:c.line},rowTitle:{fontWeight:'900',color:c.ink},selectText:{color:c.green,fontWeight:'900'},smallAdd:{backgroundColor:c.green,borderRadius:9,paddingHorizontal:10,paddingVertical:8,flexShrink:0,maxWidth:108},smallAddText:{color:'#fff',fontSize:10,fontWeight:'900',textAlign:'center'},section:{marginTop:14,paddingTop:11,borderTopWidth:1,borderTopColor:c.soft},sectionHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},sectionTitle:{fontSize:17,fontWeight:'900',color:c.ink},inlineActions:{flexDirection:'row',gap:12},link:{color:c.green,fontWeight:'900'},dangerLink:{color:c.red,fontWeight:'900'},itemRow:{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:9,borderBottomWidth:1,borderBottomColor:c.soft},stockPill:{backgroundColor:'#E4F0E8',borderRadius:999,paddingHorizontal:8,paddingVertical:5},stockPillOut:{backgroundColor:c.dangerBg},stockPillText:{fontSize:9,fontWeight:'900',color:c.greenDark},stockPillTextOut:{color:c.red},addItemButton:{paddingVertical:10},addItemText:{color:c.red,fontWeight:'900'},field:{marginTop:8},label:{fontSize:12,fontWeight:'900',color:c.muted,marginBottom:4},textInput:{backgroundColor:c.bg,color:c.ink,borderRadius:10,padding:11,borderWidth:1,borderColor:c.line},switchRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:8,borderBottomWidth:1,borderBottomColor:c.soft},switchLabel:{fontWeight:'800',color:c.ink},lightButton:{backgroundColor:c.soft,borderRadius:12,padding:12,marginTop:9},lightText:{textAlign:'center',fontWeight:'900',color:c.ink},modalBackdrop:{flex:1,backgroundColor:'rgba(0,0,0,.6)',justifyContent:'center',padding:16},modalCard:{backgroundColor:'#fff',borderRadius:18,padding:16},modalCardLarge:{backgroundColor:'#fff',borderRadius:18,padding:16,maxHeight:'88%'},modalTitle:{fontSize:21,fontWeight:'900',color:c.ink,marginBottom:12},modalActions:{flexDirection:'row',gap:10,marginTop:15},lightButtonFlex:{flex:1,backgroundColor:c.soft,borderRadius:11,padding:12},primaryFlex:{flex:1,backgroundColor:c.red,borderRadius:11,padding:12},modHeader:{fontWeight:'900',fontSize:16,color:c.greenDark,marginTop:12},modRow:{flexDirection:'row',justifyContent:'space-between',padding:10,borderRadius:10,backgroundColor:c.bg,marginBottom:7,borderWidth:1,borderColor:c.line},modRowSelected:{backgroundColor:c.green,borderColor:c.green},modName:{fontWeight:'800',color:c.ink,flex:1},modPrice:{color:c.muted,fontSize:12},modNameSelected:{color:'#fff'},
+  container:{padding:14,paddingBottom:40},title:{fontSize:24,fontWeight:'900',color:c.ink,marginBottom:12},card:{backgroundColor:c.surface,borderRadius:16,padding:14,marginBottom:13,borderWidth:1,borderColor:c.line},cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',gap:8},cardHeaderText:{flex:1,minWidth:0,paddingRight:4},cardTitle:{fontSize:19,fontWeight:'900',color:c.greenDark},help:{color:c.muted,marginTop:3,marginBottom:10},small:{color:c.muted,fontSize:12,marginTop:2},primaryButton:{backgroundColor:c.red,borderRadius:12,padding:12,marginTop:9},darkButton:{backgroundColor:c.espresso,borderRadius:12,padding:12,marginTop:9},primaryText:{color:'#fff',textAlign:'center',fontWeight:'900'},printerRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:11,borderRadius:10,backgroundColor:c.bg,marginTop:8,borderWidth:1,borderColor:c.line},rowTitle:{fontWeight:'900',color:c.ink},selectText:{color:c.green,fontWeight:'900'},smallAdd:{backgroundColor:c.green,borderRadius:9,paddingHorizontal:10,paddingVertical:8,flexShrink:0,maxWidth:108},smallAddText:{color:'#fff',fontSize:10,fontWeight:'900',textAlign:'center'},section:{marginTop:14,paddingTop:11,borderTopWidth:1,borderTopColor:c.soft},sectionHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},sectionTitle:{fontSize:17,fontWeight:'900',color:c.ink},inlineActions:{flexDirection:'row',gap:12},link:{color:c.green,fontWeight:'900'},dangerLink:{color:c.red,fontWeight:'900'},itemRow:{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:9,borderBottomWidth:1,borderBottomColor:c.soft},stockPill:{backgroundColor:'#E4F0E8',borderRadius:999,paddingHorizontal:8,paddingVertical:5},stockPillOut:{backgroundColor:c.dangerBg},stockPillText:{fontSize:9,fontWeight:'900',color:c.greenDark},stockPillTextOut:{color:c.red},loyaltyBadges:{flexDirection:'row',gap:5,marginTop:5,flexWrap:'wrap'},loyaltyBadge:{fontSize:9,fontWeight:'900',color:c.greenDark,backgroundColor:'#E4F0E8',paddingHorizontal:6,paddingVertical:3,borderRadius:999},addItemButton:{paddingVertical:10},addItemText:{color:c.red,fontWeight:'900'},field:{marginTop:8},label:{fontSize:12,fontWeight:'900',color:c.muted,marginBottom:4},textInput:{backgroundColor:c.bg,color:c.ink,borderRadius:10,padding:11,borderWidth:1,borderColor:c.line},switchRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingVertical:8,borderBottomWidth:1,borderBottomColor:c.soft},switchLabel:{fontWeight:'800',color:c.ink},lightButton:{backgroundColor:c.soft,borderRadius:12,padding:12,marginTop:9},lightText:{textAlign:'center',fontWeight:'900',color:c.ink},modalBackdrop:{flex:1,backgroundColor:'rgba(0,0,0,.6)',justifyContent:'center',padding:16},modalCard:{backgroundColor:'#fff',borderRadius:18,padding:16},modalCardLarge:{backgroundColor:'#fff',borderRadius:18,padding:16,maxHeight:'88%'},modalTitle:{fontSize:21,fontWeight:'900',color:c.ink,marginBottom:12},modalActions:{flexDirection:'row',gap:10,marginTop:15},lightButtonFlex:{flex:1,backgroundColor:c.soft,borderRadius:11,padding:12},primaryFlex:{flex:1,backgroundColor:c.red,borderRadius:11,padding:12},modHeader:{fontWeight:'900',fontSize:16,color:c.greenDark,marginTop:12},loyaltyChoice:{padding:12,borderRadius:10,backgroundColor:c.bg,marginBottom:7,borderWidth:1,borderColor:c.line},loyaltyChoiceSelected:{backgroundColor:c.green,borderColor:c.green},loyaltyChoiceText:{fontWeight:'900',color:c.ink},loyaltyChoiceTextSelected:{color:'#fff'},modRow:{flexDirection:'row',justifyContent:'space-between',padding:10,borderRadius:10,backgroundColor:c.bg,marginBottom:7,borderWidth:1,borderColor:c.line},modRowSelected:{backgroundColor:c.green,borderColor:c.green},modName:{fontWeight:'800',color:c.ink,flex:1},modPrice:{color:c.muted,fontSize:12},modNameSelected:{color:'#fff'},
 });

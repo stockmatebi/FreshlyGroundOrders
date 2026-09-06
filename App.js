@@ -11,6 +11,7 @@ import { DashboardScreen } from './src/screens/DashboardScreen';
 import { CustomersScreen } from './src/screens/CustomersScreen';
 import { AppErrorBoundary } from './src/components/AppErrorBoundary';
 import { STORAGE_KEYS, loadJson, saveJson, saveAutomaticBackup, migrateLoyaltyToCustomers } from './src/utils/storage';
+import { applyLoyaltyToCustomer } from './src/utils/loyalty';
 import { localDateKey } from './src/utils/reports';
 import { theme } from './src/theme';
 
@@ -77,14 +78,15 @@ function AppShell() {
     setOrders(nextOrders);
     await saveJson(STORAGE_KEYS.orders, nextOrders);
 
+    let loyaltyReward = null;
     if (order.customerId) {
       const now = new Date().toISOString();
       const nextCustomers = customers.map((customer) => {
         if (customer.id !== order.customerId) return customer;
-        const programKey = order.loyaltyProgram === 'Coffee' ? 'coffee' : order.loyaltyProgram === 'Meal' ? 'meal' : null;
+        const loyaltyResult = applyLoyaltyToCustomer(customer, order);
+        loyaltyReward = loyaltyResult.reward || null;
         return {
-          ...customer,
-          ...(programKey ? { [programKey]: Number(customer[programKey] || 0) + 1 } : {}),
+          ...loyaltyResult.customer,
           totalVisits: Number(customer.totalVisits || 0) + 1,
           lastVisitAt: now,
           updatedAt: now,
@@ -93,6 +95,8 @@ function AppShell() {
       setCustomers(nextCustomers);
       await saveJson(STORAGE_KEYS.customers, nextCustomers);
     }
+
+    return { loyaltyReward };
   }
 
   function getNextOrderNumber(now = new Date()) {
@@ -157,5 +161,5 @@ function Tab({ active, label, onPress }) {
 
 const c = theme.colors;
 const styles = StyleSheet.create({
-  safeArea:{flex:1,backgroundColor:c.espresso},header:{minHeight:72,padding:12,flexDirection:'row',alignItems:'center',gap:10,backgroundColor:c.espresso},logo:{width:44,height:44,borderRadius:22,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},logoText:{color:'#fff',fontWeight:'900'},brand:{color:'#fff',fontWeight:'900',fontSize:17},express:{color:'#D75A50',fontWeight:'900',letterSpacing:3},usb:{color:'#fff',backgroundColor:c.green,padding:7,borderRadius:20,fontSize:9,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},tabs:{flexDirection:'row',gap:5,padding:7,backgroundColor:c.espresso},tab:{flex:1,paddingVertical:9,paddingHorizontal:4,borderRadius:10,alignItems:'center'},tabActive:{backgroundColor:c.green},tabText:{color:'#fff',fontWeight:'900',fontSize:11},loading:{flex:1,alignItems:'center',justifyContent:'center'},
+  safeArea:{flex:1,backgroundColor:c.espresso},header:{minHeight:56,paddingHorizontal:10,paddingVertical:6,flexDirection:'row',alignItems:'center',gap:8,backgroundColor:c.espresso},logo:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},logoText:{color:'#fff',fontWeight:'900',fontSize:12},brand:{color:'#fff',fontWeight:'900',fontSize:15},express:{color:'#D75A50',fontWeight:'900',letterSpacing:2,fontSize:11},usb:{color:'#fff',backgroundColor:c.green,paddingHorizontal:8,paddingVertical:6,borderRadius:18,fontSize:8,fontWeight:'900'},body:{flex:1,backgroundColor:c.bg},tabs:{flexDirection:'row',gap:4,padding:5,backgroundColor:c.espresso},tab:{flex:1,paddingVertical:7,paddingHorizontal:3,borderRadius:8,alignItems:'center'},tabActive:{backgroundColor:c.green},tabText:{color:'#fff',fontWeight:'900',fontSize:10},loading:{flex:1,alignItems:'center',justifyContent:'center'},
 });

@@ -2,6 +2,7 @@ import { Alert, Platform } from 'react-native';
 import { receiptLogoBase64 } from '../assets/receiptLogo';
 
 let cachedPrinterModule;
+let connectedPrinterKey = null;
 
 function getPrinterModule() {
   if (cachedPrinterModule !== undefined) return cachedPrinterModule;
@@ -71,7 +72,6 @@ function buildIqRetailCode128(prefix) {
   const GS = '\x1d';
   const ESC = '\x1b';
   const encoded = `{B${String(prefix)}`;
-  // Plain Code 128 stock code only. No total, Enter or Tab is embedded.
   return `${ESC}a\x01${GS}H\x02${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`;
 }
 
@@ -97,9 +97,31 @@ async function connect(printer) {
   const vendorId = Number(printer?.vendorId);
   const productId = Number(printer?.productId);
   if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) throw new Error('The selected USB printer has invalid device IDs. Please detect and select it again.');
+  const key = `${vendorId}:${productId}`;
   await USBPrinter.init();
   await USBPrinter.connectPrinter(vendorId, productId);
+  connectedPrinterKey = key;
   return USBPrinter;
+}
+
+export async function autoConnectSavedPrinter(printer) {
+  if (Platform.OS !== 'android' || !printer) return false;
+  const vendorId = Number(printer?.vendorId);
+  const productId = Number(printer?.productId);
+  if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return false;
+  const key = `${vendorId}:${productId}`;
+  if (connectedPrinterKey === key) return true;
+  try {
+    const devices = await listUsbPrinters();
+    const attached = devices.some((device) => device.vendorId === vendorId && device.productId === productId);
+    if (!attached) { connectedPrinterKey = null; return false; }
+    await connect(printer);
+    return true;
+  } catch (error) {
+    connectedPrinterKey = null;
+    console.warn('Automatic USB printer connection failed:', error?.message || error);
+    return false;
+  }
 }
 
 async function printReceiptLogo(USBPrinter) {
@@ -118,7 +140,6 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
   if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(text));
   else if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' }));
   else throw new Error('USB print function is unavailable in this build.');
-
   if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') {
     const { prefix } = barcodeValue(order, receipt);
     await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL')) + '\n'));
@@ -130,23 +151,7 @@ async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
 async function printLoyaltyRewardSlip(USBPrinter, reward, receipt) {
   if (!reward) return;
   if (receipt.showLogo !== false) await printReceiptLogo(USBPrinter);
-  const lines = [
-    center(large(bold('LOYALTY REWARD'))),
-    center(bold('10 PURCHASES COMPLETED')),
-    '',
-    hr(),
-    reward.customerName ? center(doubleHeight(bold(reward.customerName))) : '',
-    center(doubleHeight(`${String(reward.program || '').toUpperCase()} REWARD`)),
-    '',
-    center(large(bold(`CLAIM UP TO ${formatMoney(reward.value)}`))),
-    '',
-    center('Present this slip when claiming your reward.'),
-    center('One reward claim per completed loyalty cycle.'),
-    hr(),
-    center('FRESHLY GROUND EXPRESS'),
-    '',
-  ].filter((line) => line !== null);
-
+  const lines = [center(large(bold('LOYALTY REWARD'))), center(bold('10 PURCHASES COMPLETED')), '', hr(), reward.customerName ? center(doubleHeight(bold(reward.customerName))) : '', center(doubleHeight(`${String(reward.program || '').toUpperCase()} REWARD`)), '', center(large(bold(`CLAIM UP TO ${formatMoney(reward.value)}`))), '', center('Present this slip when claiming your reward.'), center('One reward claim per completed loyalty cycle.'), hr(), center('FRESHLY GROUNDED EXPRESS'), ''].filter((line) => line !== null);
   if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(lines.join('\n') + '\n'));
   if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: true, tailingLine: true, encoding: 'UTF-8' }));
 }
@@ -162,6 +167,7 @@ export async function printOrderSlip(order, settings, options = {}) {
     if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
     return { printed: true, copies: order.loyaltyReward ? 3 : 2 };
   } catch (error) {
+    connectedPrinterKey = null;
     console.warn('USB print failed:', error?.message || error);
     Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.');
     return { printed: false, reason: error?.message || 'Unknown printer error' };

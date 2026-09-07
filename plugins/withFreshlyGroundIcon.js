@@ -13,7 +13,9 @@ function write(file, content) {
 
 module.exports = function withFreshlyGroundIcon(config) {
   return withDangerousMod(config, ['android', async (cfg) => {
-    const res = path.join(cfg.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res');
+    const projectRoot = cfg.modRequest.platformProjectRoot;
+    const res = path.join(projectRoot, 'app', 'src', 'main', 'res');
+    const manifestPath = path.join(projectRoot, 'app', 'src', 'main', 'AndroidManifest.xml');
 
     const foreground = `<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -39,10 +41,38 @@ module.exports = function withFreshlyGroundIcon(config) {
     <color name="fge_icon_background">#201812</color>
 </resources>`;
 
+    // No vendor/product IDs are hard-coded here. Android routes a newly attached
+    // USB device to the app; the JS layer then reconnects only to the printer
+    // whose numeric vendorId/productId are already saved in app settings.
+    const usbFilter = `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <usb-device />
+</resources>`;
+
     write(path.join(res, 'drawable', 'fge_launcher_foreground.xml'), foreground);
     write(path.join(res, 'values', 'fge_icon_colors.xml'), colors);
     write(path.join(res, 'mipmap-anydpi-v26', 'ic_launcher.xml'), adaptive);
     write(path.join(res, 'mipmap-anydpi-v26', 'ic_launcher_round.xml'), adaptive);
+    write(path.join(res, 'xml', 'usb_device_filter.xml'), usbFilter);
+
+    if (fs.existsSync(manifestPath)) {
+      let manifest = fs.readFileSync(manifestPath, 'utf8');
+      if (!manifest.includes('android.hardware.usb.host')) {
+        manifest = manifest.replace('<application', '  <uses-feature android:name="android.hardware.usb.host" android:required="false" />\n  <application');
+      }
+      if (!manifest.includes('android.hardware.usb.action.USB_DEVICE_ATTACHED')) {
+        const activityEnd = manifest.indexOf('</activity>');
+        if (activityEnd !== -1) {
+          const usbIntent = `        <intent-filter>
+          <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+        </intent-filter>
+        <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/usb_device_filter" />
+`;
+          manifest = manifest.slice(0, activityEnd) + usbIntent + manifest.slice(activityEnd);
+        }
+      }
+      fs.writeFileSync(manifestPath, manifest, 'utf8');
+    }
 
     return cfg;
   }]);

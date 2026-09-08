@@ -42,30 +42,26 @@ export function loyaltyValueForOrder(cart = [], program = '') {
 }
 
 export function loyaltySummaryForOrder(cart = [], preferred = '') {
+  const eligibility = cartEligibility(cart);
   const program = resolveLoyaltyProgram(cart, preferred);
   return {
     program: program || null,
     value: program ? loyaltyValueForOrder(cart, program) : 0,
-    eligibility: cartEligibility(cart),
+    eligibility,
+    values: {
+      Coffee: eligibility.Coffee ? loyaltyValueForOrder(cart, 'Coffee') : 0,
+      Meal: eligibility.Meal ? loyaltyValueForOrder(cart, 'Meal') : 0,
+    },
   };
 }
 
-export function applyLoyaltyToCustomer(customer, order) {
-  const program = order?.loyaltyProgram;
-  if (!customer || !LOYALTY_PROGRAMS.includes(program)) {
-    return { customer, reward: null };
-  }
-
+function applySingleProgram(customer, order, program, pointValue) {
   const key = program.toLowerCase();
   const cycleTotalKey = `${key}CycleTotal`;
   const lastRewardKey = `${key}LastReward`;
   const rewardAtKey = `${key}LastRewardAt`;
-  const pointValue = Math.max(0, Number(order?.loyaltyValue || 0));
   const currentCount = Math.max(0, Number(customer?.[key] || 0));
 
-  // Older customer records may already have points but no value history. Preserve
-  // those points by using the current qualifying order value as the best available
-  // estimate for the missing historic values instead of throwing the points away.
   const storedCycleTotal = Number(customer?.[cycleTotalKey]);
   const currentCycleTotal = Number.isFinite(storedCycleTotal) && storedCycleTotal > 0
     ? storedCycleTotal
@@ -101,5 +97,38 @@ export function applyLoyaltyToCustomer(customer, order) {
       [cycleTotalKey]: Number(nextCycleTotal.toFixed(2)),
     },
     reward: null,
+  };
+}
+
+export function applyLoyaltyToCustomer(customer, order) {
+  if (!customer) return { customer, reward: null, rewards: [] };
+
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const eligibility = cartEligibility(items);
+  let programs = LOYALTY_PROGRAMS.filter((program) => eligibility[program]);
+
+  // Backward compatibility for older saved orders that only stored one loyalty program.
+  if (!programs.length && LOYALTY_PROGRAMS.includes(order?.loyaltyProgram)) {
+    programs = [order.loyaltyProgram];
+  }
+
+  if (!programs.length) return { customer, reward: null, rewards: [] };
+
+  let updatedCustomer = customer;
+  const rewards = [];
+
+  programs.forEach((program) => {
+    const calculatedValue = loyaltyValueForOrder(items, program);
+    const legacyValue = program === order?.loyaltyProgram ? Math.max(0, Number(order?.loyaltyValue || 0)) : 0;
+    const pointValue = calculatedValue || legacyValue;
+    const result = applySingleProgram(updatedCustomer, order, program, pointValue);
+    updatedCustomer = result.customer;
+    if (result.reward) rewards.push(result.reward);
+  });
+
+  return {
+    customer: updatedCustomer,
+    reward: rewards[0] || null,
+    rewards,
   };
 }

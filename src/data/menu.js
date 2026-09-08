@@ -40,18 +40,30 @@ const drinkSizes = (prices) => [{
 
 const meal = ['Meal'];
 const coffee = ['Coffee'];
+const breakfastToppings = [
+  'breakfast-bacon',
+  'breakfast-tomato',
+  'breakfast-onion',
+  'breakfast-ham',
+  'breakfast-cheese',
+  'breakfast-egg',
+  'breakfast-avo',
+  'breakfast-mince',
+  'breakfast-patty',
+  'breakfast-wors',
+];
 
 export const defaultMenu = [
   {
     id: 'breakfast', name: 'Breakfast', sortOrder: 1,
     items: [
-      { id: 'breakfast-special', name: 'Breakfast Special', description: '', price: 40, active: true, soldOut: false, sortOrder: 1, modifiers: [], loyaltyPrograms: meal, optionGroups: eggsAndBread },
-      { id: 'farmers-breakfast', name: "Farmer's Breakfast", description: '', price: 55, active: true, soldOut: false, sortOrder: 2, modifiers: [], loyaltyPrograms: meal, optionGroups: eggsAndBread },
-      { id: 'eggs-benedict', name: 'Eggs Benedict', description: '', price: 50, active: true, soldOut: false, sortOrder: 3, modifiers: [], loyaltyPrograms: meal },
-      { id: 'breakfast-waffle', name: 'Breakfast Waffle', description: '', price: 35, active: true, soldOut: false, sortOrder: 4, modifiers: [], loyaltyPrograms: meal },
-      { id: 'ciabatta-toast', name: 'Ciabatta Toast', description: 'Avo + Cottage Cheese', price: 30, active: true, soldOut: false, sortOrder: 5, modifiers: [], loyaltyPrograms: meal },
-      { id: 'cheese-rye', name: 'Cheese on Rye Bread', description: 'Bacon / Spring Onion / Avo', price: 50, active: true, soldOut: false, sortOrder: 6, modifiers: [], loyaltyPrograms: meal },
-      { id: 'cheese-omelette', name: 'Cheese Omelette', description: 'Extra toppings R10', price: 25, active: true, soldOut: false, sortOrder: 7, modifiers: ['extra-topping'], loyaltyPrograms: meal },
+      { id: 'breakfast-special', name: 'Breakfast Special', description: '', price: 40, active: true, soldOut: false, sortOrder: 1, modifiers: breakfastToppings, loyaltyPrograms: meal, optionGroups: eggsAndBread },
+      { id: 'farmers-breakfast', name: "Farmer's Breakfast", description: '', price: 55, active: true, soldOut: false, sortOrder: 2, modifiers: breakfastToppings, loyaltyPrograms: meal, optionGroups: eggsAndBread },
+      { id: 'eggs-benedict', name: 'Eggs Benedict', description: '', price: 50, active: true, soldOut: false, sortOrder: 3, modifiers: breakfastToppings, loyaltyPrograms: meal },
+      { id: 'breakfast-waffle', name: 'Breakfast Waffle', description: '', price: 35, active: true, soldOut: false, sortOrder: 4, modifiers: breakfastToppings, loyaltyPrograms: meal },
+      { id: 'ciabatta-toast', name: 'Ciabatta Toast', description: 'Avo + Cottage Cheese', price: 30, active: true, soldOut: false, sortOrder: 5, modifiers: breakfastToppings, loyaltyPrograms: meal },
+      { id: 'cheese-rye', name: 'Cheese on Rye Bread', description: 'Bacon / Spring Onion / Avo', price: 50, active: true, soldOut: false, sortOrder: 6, modifiers: breakfastToppings, loyaltyPrograms: meal },
+      { id: 'cheese-omelette', name: 'Cheese Omelette', description: 'Choose extra toppings', price: 25, active: true, soldOut: false, sortOrder: 7, modifiers: breakfastToppings, loyaltyPrograms: meal },
     ],
   },
   {
@@ -114,7 +126,16 @@ export const defaultMenu = [
     id: 'extras', name: 'Extras', sortOrder: 6, isModifierSource: true,
     items: [
       { id: 'extra-shot', name: 'Extra Shot Coffee', description: '', price: 5, active: true, soldOut: false, sortOrder: 1, modifiers: [] },
-      { id: 'extra-topping', name: 'Extra Topping', description: '', price: 10, active: true, soldOut: false, sortOrder: 2, modifiers: [] },
+      { id: 'breakfast-bacon', name: 'Bacon', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 2, modifiers: [] },
+      { id: 'breakfast-tomato', name: 'Tomato', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 3, modifiers: [] },
+      { id: 'breakfast-onion', name: 'Onion', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 4, modifiers: [] },
+      { id: 'breakfast-ham', name: 'Ham', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 5, modifiers: [] },
+      { id: 'breakfast-cheese', name: 'Cheese', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 6, modifiers: [] },
+      { id: 'breakfast-egg', name: 'Egg', description: 'Breakfast topping', price: 10, active: true, soldOut: false, sortOrder: 7, modifiers: [] },
+      { id: 'breakfast-avo', name: 'Avo', description: 'Breakfast topping', price: 15, active: true, soldOut: false, sortOrder: 8, modifiers: [] },
+      { id: 'breakfast-mince', name: 'Mince', description: 'Breakfast topping', price: 15, active: true, soldOut: false, sortOrder: 9, modifiers: [] },
+      { id: 'breakfast-patty', name: 'Patty', description: 'Breakfast topping', price: 15, active: true, soldOut: false, sortOrder: 10, modifiers: [] },
+      { id: 'breakfast-wors', name: 'Wors', description: 'Breakfast topping', price: 15, active: true, soldOut: false, sortOrder: 11, modifiers: [] },
     ],
   },
 ];

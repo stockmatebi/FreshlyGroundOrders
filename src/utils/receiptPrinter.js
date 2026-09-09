@@ -19,6 +19,20 @@ function bold(text) { const commands = getCommands(); return `${commands?.TEXT_F
 function large(text) { const commands = getCommands(); if (commands?.TEXT_FORMAT?.TXT_4SQUARE && commands?.TEXT_FORMAT?.TXT_NORMAL) return `${commands.TEXT_FORMAT.TXT_4SQUARE}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`; return `\x1b!\x30${text}\x1b!\x00`; }
 function doubleHeight(text) { const commands = getCommands(); if (commands?.TEXT_FORMAT?.TXT_2HEIGHT && commands?.TEXT_FORMAT?.TXT_NORMAL) return `${commands.TEXT_FORMAT.TXT_2HEIGHT}${text}${commands.TEXT_FORMAT.TXT_NORMAL}`; return `\x1b!\x10${text}\x1b!\x00`; }
 
+function simplifyChoiceName(name = '') {
+  const text = String(name).trim();
+  const lower = text.toLowerCase();
+  if (lower.startsWith('how would you like your eggs:')) {
+    const value = text.split(':').slice(1).join(':').trim();
+    return `Eggs: ${value}`;
+  }
+  if (lower.startsWith('white or brown bread:')) {
+    const value = text.split(':').slice(1).join(':').trim().replace(/\s+bread$/i, '');
+    return `Bread: ${value}`;
+  }
+  return text;
+}
+
 export function buildSlipText(order, receipt = {}, options = {}) {
   const isReprint = Boolean(options.reprint), copyLabel = options.copyLabel || '', lines = [];
   if (copyLabel) { lines.push(center(large(bold(copyLabel)))); lines.push(''); }
@@ -34,7 +48,11 @@ export function buildSlipText(order, receipt = {}, options = {}) {
     const qty = Number(item.qty || 0), baseUnit = Number(item.unitPrice ?? item.price ?? 0), baseLineTotal = qty * baseUnit;
     const price = receipt.showPrices === false ? '' : `  ${formatMoney(baseLineTotal)}`;
     lines.push(doubleHeight(bold(`${qty} x ${item.name}${price}`)));
-    (item.selectedModifiers || []).forEach((mod) => { const modifierLineTotal = qty * Number(mod.price || 0); const modPrice = receipt.showPrices === false || modifierLineTotal === 0 ? '' : ` +${formatMoney(modifierLineTotal)}`; lines.push(bold(`   • ${mod.name}${modPrice}`)); });
+    (item.selectedModifiers || []).forEach((mod) => {
+      const modifierLineTotal = qty * Number(mod.price || 0);
+      const modPrice = receipt.showPrices === false || modifierLineTotal === 0 ? '' : ` +${formatMoney(modifierLineTotal)}`;
+      lines.push(bold(`   • ${simplifyChoiceName(mod.name)}${modPrice}`));
+    });
     if (receipt.showNotes !== false && item.note) lines.push(bold(`   NOTE: ${item.note}`));
   });
   if (receipt.showNotes !== false && order.orderNote) { lines.push('', doubleHeight(bold('ORDER NOTE:')), doubleHeight(bold(order.orderNote))); }
@@ -44,7 +62,7 @@ export function buildSlipText(order, receipt = {}, options = {}) {
 }
 
 export function barcodeValue(order, receipt = {}) { const prefix = String(receipt.barcodePrefix || '31010001').replace(/\D/g, '') || '31010001'; return { prefix }; }
-function buildIqRetailCode128(prefix) { const GS = '\x1d', ESC = '\x1b', encoded = `{B${String(prefix)}`; return `${ESC}a\x01${GS}H\x02${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`; }
+function buildIqRetailCode128(prefix) { const GS = '\x1d', ESC = '\x1b', encoded = `{B${String(prefix)}`; return `${ESC}a\x01${GS}H\x00${GS}h\x64${GS}w\x02${GS}k\x49${String.fromCharCode(encoded.length)}${encoded}\n${ESC}a\x00`; }
 function normalizeUsbDevice(device, index) { const vendorId = Number(device?.vendorId ?? device?.vendor_id), productId = Number(device?.productId ?? device?.product_id); if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return null; return { id: `${vendorId}-${productId}-${index}`, name: device?.deviceName || device?.device_name || 'USB Thermal Printer', vendorId, productId }; }
 
 export async function listUsbPrinters() {

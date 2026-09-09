@@ -12,6 +12,7 @@
     "@haroldtran/react-native-thermal-printer": "1.2.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.0",
+    "expo-camera": "~17.0.10",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.24",
     "expo-print": "~15.0.8",

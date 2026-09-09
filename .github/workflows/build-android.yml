@@ -13,6 +13,7 @@ jobs:
 
     env:
       NODE_ENV: production
+      EXPO_PUBLIC_POS_SYNC_KEY: ${{ secrets.POS_SYNC_KEY }}
 
     steps:
       - name: Checkout repository
@@ -34,6 +35,14 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Verify POS sync configuration
+        run: |
+          if [ -z "$EXPO_PUBLIC_POS_SYNC_KEY" ]; then
+            echo "POS_SYNC_KEY GitHub secret is missing"
+            exit 1
+          fi
+          echo "POS sync configuration present"
 
       - name: Generate Android native project
         run: npx expo prebuild --platform android --no-install --clean

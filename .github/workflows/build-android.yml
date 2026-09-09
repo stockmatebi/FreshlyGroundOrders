@@ -44,6 +44,9 @@ jobs:
           fi
           echo "POS sync configuration present"
 
+      - name: Apply loyalty scanner integration
+        run: node scripts/apply-loyalty-scanner.js
+
       - name: Generate Android native project
         run: npx expo prebuild --platform android --no-install --clean
 

@@ -185,7 +185,7 @@ jobs:
           username: freshlyground@megabi.co.za
           password: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
           subject: Freshly Ground Express Monthly Sales Report - ${{ steps.month.outputs.month }}
-          to: ${{ github.event_name == 'workflow_dispatch' && 'morne@megabi.co.za' || 'Morne@megabi.co.za,Debtors.howick@megabi.co.za' }}
+          to: ${{ github.event_name == 'workflow_dispatch' && 'morne@megabi.co.za' || 'Morne@megabi.co.za,Debtors.howick@megabi.co.za,brodryk@megabi.co.za' }}
           from: Freshly Ground Express <freshlyground@megabi.co.za>
           body: file://daily-sales-summary.txt
           attachments: monthly-sales-report.pdf

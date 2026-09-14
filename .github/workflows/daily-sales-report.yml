@@ -1,15 +1,30 @@
-name: Daily Freshly Ground Sales Report
+name: Freshly Ground Sales Reports
 
 on:
   schedule:
     - cron: '0 14 * * *'
+    - cron: '10 14 1 * *'
   workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Report to run'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - monthly
+      month:
+        description: 'Monthly report month (YYYY-MM). Leave blank for previous month.'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  report:
+  daily-report:
+    if: github.event.schedule == '0 14 * * *' || (github.event_name == 'workflow_dispatch' && inputs.report_type == 'daily')
     runs-on: ubuntu-latest
     env:
       TZ: Africa/Johannesburg
@@ -41,20 +56,17 @@ jobs:
         env:
           BUSINESS_DATE: ${{ steps.date.outputs.date }}
         run: python scripts/fetch-daily-sales.py
-      - name: Build comprehensive report
+      - name: Build daily report
         if: steps.duplicate.outputs.skip != 'true'
         run: python scripts/build-daily-sales-report.py
-      - name: Create A4 PDF
+      - name: Create daily A4 PDF
         if: steps.duplicate.outputs.skip != 'true'
         run: |
           BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
-          if [ -z "$BROWSER" ]; then
-            echo "No Chromium/Chrome browser available on runner"
-            exit 1
-          fi
+          test -n "$BROWSER"
           "$BROWSER" --headless --no-sandbox --disable-gpu --print-to-pdf="daily-sales-report.pdf" --print-to-pdf-no-header "file://$PWD/daily-sales-report.html"
           test -s daily-sales-report.pdf
-      - name: Email PDF report
+      - name: Email daily PDF report
         if: steps.duplicate.outputs.skip != 'true'
         uses: dawidd6/action-send-mail@v18
         with:
@@ -68,7 +80,7 @@ jobs:
           from: Freshly Ground Express <freshlyground@megabi.co.za>
           body: file://daily-sales-summary.txt
           attachments: daily-sales-report.pdf
-      - name: Mark scheduled report sent
+      - name: Mark scheduled daily report sent
         if: github.event_name == 'schedule' && steps.duplicate.outputs.skip != 'true' && success()
         run: |
           mkdir -p report-log
@@ -77,4 +89,113 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add report-log/
           git commit -m "Mark daily sales report sent for ${{ steps.date.outputs.date }}" || exit 0
+          git push
+
+  monthly-report:
+    if: github.event.schedule == '10 14 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.report_type == 'monthly')
+    runs-on: ubuntu-latest
+    env:
+      TZ: Africa/Johannesburg
+      BUSINESS_TZ: Africa/Johannesburg
+      SUPABASE_URL: https://iymwzyxlvtyidebxdzyw.supabase.co
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Determine report month
+        id: month
+        env:
+          REQUESTED_MONTH: ${{ inputs.month }}
+        run: |
+          MONTH=$(python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          requested=os.getenv('REQUESTED_MONTH','').strip()
+          if requested:
+              print(requested[:7])
+          else:
+              now=datetime.now(ZoneInfo('Africa/Johannesburg'))
+              if now.month == 1:
+                  print(f'{now.year-1}-12')
+              else:
+                  print(f'{now.year}-{now.month-1:02d}')
+          PY
+          )
+          echo "month=$MONTH" >> "$GITHUB_OUTPUT"
+      - name: Skip duplicate scheduled monthly report
+        id: duplicate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -f "report-log/monthly-${{ steps.month.outputs.month }}.sent" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Query full month from Supabase
+        if: steps.duplicate.outputs.skip != 'true'
+        env:
+          REPORT_MONTH: ${{ steps.month.outputs.month }}
+        run: |
+          mkdir -p monthly-input
+          python - <<'PY' > monthly-dates.txt
+          import os, calendar
+          y,m=map(int,os.environ['REPORT_MONTH'].split('-'))
+          for d in range(1,calendar.monthrange(y,m)[1]+1):
+              print(f'{y:04d}-{m:02d}-{d:02d}')
+          PY
+          while IFS= read -r d; do
+            BUSINESS_DATE="$d" python scripts/fetch-daily-sales.py
+            cp daily-sales.json "monthly-input/$d.json"
+          done < monthly-dates.txt
+          python - <<'PY'
+          import glob,json,os
+          rows=[]; source='sales'
+          for path in sorted(glob.glob('monthly-input/*.json')):
+              with open(path,encoding='utf-8') as f:
+                  p=json.load(f)
+              rows.extend(p.get('rows',[]))
+              source=p.get('source',source)
+          with open('daily-sales.json','w',encoding='utf-8') as f:
+              json.dump({'business_date':os.environ['REPORT_MONTH'],'source':source,'rows':rows},f)
+          print(f'Combined {len(rows)} orders for {os.environ["REPORT_MONTH"]}')
+          PY
+      - name: Build monthly report
+        if: steps.duplicate.outputs.skip != 'true'
+        run: python scripts/build-daily-sales-report.py
+      - name: Create monthly A4 PDF
+        if: steps.duplicate.outputs.skip != 'true'
+        run: |
+          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$BROWSER"
+          "$BROWSER" --headless --no-sandbox --disable-gpu --print-to-pdf="monthly-sales-report.pdf" --print-to-pdf-no-header "file://$PWD/daily-sales-report.html"
+          test -s monthly-sales-report.pdf
+      - name: Email monthly PDF report
+        if: steps.duplicate.outputs.skip != 'true'
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: mail.megabi.co.za
+          server_port: 465
+          secure: true
+          username: freshlyground@megabi.co.za
+          password: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
+          subject: Freshly Ground Express Monthly Sales Report - ${{ steps.month.outputs.month }}
+          to: ${{ github.event_name == 'workflow_dispatch' && 'morne@megabi.co.za' || 'Morne@megabi.co.za,Debtors.howick@megabi.co.za' }}
+          from: Freshly Ground Express <freshlyground@megabi.co.za>
+          body: file://daily-sales-summary.txt
+          attachments: monthly-sales-report.pdf
+      - name: Mark scheduled monthly report sent
+        if: github.event_name == 'schedule' && steps.duplicate.outputs.skip != 'true' && success()
+        run: |
+          mkdir -p report-log
+          printf 'Freshly Ground Express monthly sales report sent for %s\n' "${{ steps.month.outputs.month }}" > "report-log/monthly-${{ steps.month.outputs.month }}.sent"
+          git config user.name "Freshly Ground Reports"
+          git config user.email "actions@users.noreply.github.com"
+          git add report-log/
+          git commit -m "Mark monthly sales report sent for ${{ steps.month.outputs.month }}" || exit 0
           git push

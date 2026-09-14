@@ -1,0 +1,52 @@
+name: Daily Freshly Ground Sales Report
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Africa/Johannesburg
+      BUSINESS_TZ: Africa/Johannesburg
+      SUPABASE_URL: https://iymwzyxlvtyidebxdzyw.supabase.co
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Determine Johannesburg business date
+        id: date
+        run: echo "date=$(TZ=Africa/Johannesburg date +%F)" >> "$GITHUB_OUTPUT"
+      - name: Skip duplicate report
+        id: duplicate
+        run: |
+          if [ -f "report-log/${{ steps.date.outputs.date }}.sent" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate and send report
+        if: steps.duplicate.outputs.skip != 'true'
+        env:
+          BUSINESS_DATE: ${{ steps.date.outputs.date }}
+        run: python scripts/daily-sales-report.py
+      - name: Mark report sent
+        if: steps.duplicate.outputs.skip != 'true' && success()
+        run: |
+          mkdir -p report-log
+          printf 'Freshly Ground Express daily sales report sent for %s\n' "${{ steps.date.outputs.date }}" > "report-log/${{ steps.date.outputs.date }}.sent"
+          git config user.name "Freshly Ground Reports"
+          git config user.email "actions@users.noreply.github.com"
+          git add report-log/
+          git commit -m "Mark daily sales report sent for ${{ steps.date.outputs.date }}" || exit 0
+          git push

@@ -7,6 +7,7 @@ with open('daily-sales.json', encoding='utf-8') as f:
 rows = payload['rows']
 day = payload['business_date']
 source = payload['source']
+report_type = 'Monthly' if len(str(day)) == 7 else 'Daily'
 
 
 def first(d, *keys, default=None):
@@ -146,7 +147,7 @@ tr:nth-child(even) td {{ background:#f7f7f7; }}
 .warning {{ border:1px solid #d7b36a; background:#fff8e8; padding:9px; border-radius:5px; margin:8px 0; }}
 .footer {{ color:#777; font-size:9px; border-top:1px solid #ddd; padding-top:8px; margin-top:18px; }}
 </style></head><body>
-<div class="header"><h1>Freshly Ground Express</h1><div class="subtitle">Daily Sales Report — {escape(day)}</div></div>
+<div class="header"><h1>Freshly Ground Express</h1><div class="subtitle">{report_type} Sales Report — {escape(str(day))}</div></div>
 <div class="cards">
 <div class="card"><div class="label">Turnover</div><div class="value">{money(turnover)}</div></div>
 <div class="card"><div class="label">Orders</div><div class="value">{len(orders)}</div></div>
@@ -162,10 +163,10 @@ tr:nth-child(even) td {{ background:#f7f7f7; }}
 
 open('daily-sales-report.html', 'w', encoding='utf-8').write(html)
 open('daily-sales-summary.txt', 'w', encoding='utf-8').write(
-    f'Freshly Ground Express daily sales report for {day}\n'
+    f'Freshly Ground Express {report_type.lower()} sales report for {day}\n'
     f'Turnover: {money(turnover)}\n'
     f'Orders: {len(orders)}\n'
     f'Average order: {money(avg)}\n'
     f'Product lines found: {len(all_rows)}\n'
 )
-print(f'Built report for {day}: {len(orders)} orders, {money(turnover)} turnover, {len(all_rows)} products')
+print(f'Built {report_type.lower()} report for {day}: {len(orders)} orders, {money(turnover)} turnover, {len(all_rows)} products')

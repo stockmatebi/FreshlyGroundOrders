@@ -16,7 +16,6 @@ jobs:
       BUSINESS_TZ: Africa/Johannesburg
       SUPABASE_URL: https://iymwzyxlvtyidebxdzyw.supabase.co
       SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,11 +34,28 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Generate and send report
+      - name: Query Supabase sales
         if: steps.duplicate.outputs.skip != 'true'
         env:
           BUSINESS_DATE: ${{ steps.date.outputs.date }}
-        run: python scripts/daily-sales-report.py
+        run: python scripts/fetch-daily-sales.py
+      - name: Build comprehensive report
+        if: steps.duplicate.outputs.skip != 'true'
+        run: python scripts/build-daily-sales-report.py
+      - name: Email report
+        if: steps.duplicate.outputs.skip != 'true'
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: mail.megabi.co.za
+          server_port: 465
+          secure: true
+          username: freshlyground@megabi.co.za
+          password: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
+          subject: Freshly Ground Express Daily Sales Report - ${{ steps.date.outputs.date }}
+          to: Morne@megabi.co.za,Debtors.howick@megabi.co.za
+          from: Freshly Ground Express <freshlyground@megabi.co.za>
+          body: file://daily-sales-summary.txt
+          html_body: file://daily-sales-report.html
       - name: Mark report sent
         if: steps.duplicate.outputs.skip != 'true' && success()
         run: |

@@ -26,10 +26,12 @@ jobs:
       - name: Determine Johannesburg business date
         id: date
         run: echo "date=$(TZ=Africa/Johannesburg date +%F)" >> "$GITHUB_OUTPUT"
-      - name: Skip duplicate report
+      - name: Skip duplicate scheduled report
         id: duplicate
         run: |
-          if [ -f "report-log/${{ steps.date.outputs.date }}.sent" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -f "report-log/${{ steps.date.outputs.date }}.sent" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -42,7 +44,17 @@ jobs:
       - name: Build comprehensive report
         if: steps.duplicate.outputs.skip != 'true'
         run: python scripts/build-daily-sales-report.py
-      - name: Email report
+      - name: Create A4 PDF
+        if: steps.duplicate.outputs.skip != 'true'
+        run: |
+          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          if [ -z "$BROWSER" ]; then
+            echo "No Chromium/Chrome browser available on runner"
+            exit 1
+          fi
+          "$BROWSER" --headless --no-sandbox --disable-gpu --print-to-pdf="daily-sales-report.pdf" --print-to-pdf-no-header "file://$PWD/daily-sales-report.html"
+          test -s daily-sales-report.pdf
+      - name: Email PDF report
         if: steps.duplicate.outputs.skip != 'true'
         uses: dawidd6/action-send-mail@v18
         with:
@@ -52,12 +64,12 @@ jobs:
           username: freshlyground@megabi.co.za
           password: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
           subject: Freshly Ground Express Daily Sales Report - ${{ steps.date.outputs.date }}
-          to: Morne@megabi.co.za,Debtors.howick@megabi.co.za
+          to: ${{ github.event_name == 'workflow_dispatch' && 'morne@megabi.co.za' || 'Morne@megabi.co.za,Debtors.howick@megabi.co.za' }}
           from: Freshly Ground Express <freshlyground@megabi.co.za>
           body: file://daily-sales-summary.txt
-          html_body: file://daily-sales-report.html
-      - name: Mark report sent
-        if: steps.duplicate.outputs.skip != 'true' && success()
+          attachments: daily-sales-report.pdf
+      - name: Mark scheduled report sent
+        if: github.event_name == 'schedule' && steps.duplicate.outputs.skip != 'true' && success()
         run: |
           mkdir -p report-log
           printf 'Freshly Ground Express daily sales report sent for %s\n' "${{ steps.date.outputs.date }}" > "report-log/${{ steps.date.outputs.date }}.sent"

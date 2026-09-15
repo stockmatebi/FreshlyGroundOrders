@@ -1,0 +1,96 @@
+name: Freshly Ground Daily Sales Watchdog
+
+on:
+  schedule:
+    # Backup attempts from 16:05 to 18:50 South Africa time.
+    # The first successful run creates the daily .sent marker; later attempts exit.
+    - cron: '5,20,35,50 14-16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: freshly-ground-daily-sales-report
+  cancel-in-progress: false
+
+jobs:
+  daily-report-watchdog:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Africa/Johannesburg
+      BUSINESS_TZ: Africa/Johannesburg
+      SUPABASE_URL: https://iymwzyxlvtyidebxdzyw.supabase.co
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Determine Johannesburg business date
+        id: date
+        run: echo "date=$(TZ=Africa/Johannesburg date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether today's scheduled report was already sent
+        id: duplicate
+        run: |
+          MARKER="report-log/${{ steps.date.outputs.date }}.sent"
+          if [ -f "$MARKER" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Daily report already marked sent for ${{ steps.date.outputs.date }}"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Query Supabase sales
+        if: steps.duplicate.outputs.skip != 'true'
+        env:
+          BUSINESS_DATE: ${{ steps.date.outputs.date }}
+        run: python scripts/fetch-daily-sales.py
+
+      - name: Build daily report
+        if: steps.duplicate.outputs.skip != 'true'
+        run: python scripts/build-daily-sales-report.py
+
+      - name: Create daily A4 PDF
+        if: steps.duplicate.outputs.skip != 'true'
+        run: |
+          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$BROWSER"
+          "$BROWSER" --headless --no-sandbox --disable-gpu --print-to-pdf="daily-sales-report.pdf" --print-to-pdf-no-header "file://$PWD/daily-sales-report.html"
+          test -s daily-sales-report.pdf
+
+      - name: Email daily PDF report
+        if: steps.duplicate.outputs.skip != 'true'
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: mail.megabi.co.za
+          server_port: 465
+          secure: true
+          username: freshlyground@megabi.co.za
+          password: ${{ secrets.SMTP_PASSWORD || secrets.MAIL_PASSWORD || secrets.EMAIL_PASSWORD }}
+          subject: Freshly Ground Express Daily Sales Report - ${{ steps.date.outputs.date }}
+          to: Morne@megabi.co.za,Debtors.howick@megabi.co.za
+          from: Freshly Ground Express <freshlyground@megabi.co.za>
+          body: file://daily-sales-summary.txt
+          attachments: daily-sales-report.pdf
+
+      - name: Mark daily report sent
+        if: steps.duplicate.outputs.skip != 'true' && success()
+        run: |
+          mkdir -p report-log
+          SENT_AT=$(TZ=Africa/Johannesburg date '+%Y-%m-%d %H:%M:%S %Z')
+          {
+            echo "Freshly Ground Express daily sales report sent for ${{ steps.date.outputs.date }}"
+            echo "scheduled=true"
+            echo "sent_at=$SENT_AT"
+          } > "report-log/${{ steps.date.outputs.date }}.sent"
+          git config user.name "Freshly Ground Reports"
+          git config user.email "actions@users.noreply.github.com"
+          git add "report-log/${{ steps.date.outputs.date }}.sent"
+          git commit -m "Mark daily sales report sent for ${{ steps.date.outputs.date }}" || exit 0
+          git push

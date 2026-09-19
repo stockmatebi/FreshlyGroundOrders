@@ -111,5 +111,17 @@ export const defaultMenu = [
 ];
 
 export function normalizeMenu(menu = []) {
-  return menu.map((section, sectionIndex) => ({ ...section, sortOrder: section.sortOrder ?? sectionIndex + 1, items: (section.items || []).map((item, itemIndex) => ({ description: '', active: true, soldOut: false, modifiers: [], loyaltyPrograms: [], optionGroups: [], sortOrder: itemIndex + 1, ...item })) }));
+  const defaultsById = new Map(defaultMenu.flatMap((section) => (section.items || []).map((item) => [item.id, item])));
+  return menu.map((section, sectionIndex) => ({
+    ...section,
+    sortOrder: section.sortOrder ?? sectionIndex + 1,
+    items: (section.items || []).map((item, itemIndex) => {
+      const defaults = defaultsById.get(item.id) || {};
+      const normalized = { description: '', active: true, soldOut: false, modifiers: [], loyaltyPrograms: [], optionGroups: [], sortOrder: itemIndex + 1, ...item };
+      if ((!Array.isArray(normalized.optionGroups) || normalized.optionGroups.length === 0) && Array.isArray(defaults.optionGroups) && defaults.optionGroups.length) normalized.optionGroups = defaults.optionGroups;
+      if ((!Array.isArray(normalized.modifiers) || normalized.modifiers.length === 0) && Array.isArray(defaults.modifiers) && defaults.modifiers.length) normalized.modifiers = defaults.modifiers;
+      if ((!Array.isArray(normalized.loyaltyPrograms) || normalized.loyaltyPrograms.length === 0) && Array.isArray(defaults.loyaltyPrograms) && defaults.loyaltyPrograms.length) normalized.loyaltyPrograms = defaults.loyaltyPrograms;
+      return normalized;
+    }),
+  }));
 }

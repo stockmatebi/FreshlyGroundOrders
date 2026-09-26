@@ -1,24 +1,59 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const SYNC_URL = 'https://iymwzyxlvtyidebxdzyw.supabase.co/functions/v1/sync-sale';
 const POS_SYNC_KEY = process.env.EXPO_PUBLIC_POS_SYNC_KEY || '';
+const SYNCED_ORDERS_KEY = 'FGE_CLOUD_SYNCED_ORDER_IDS_V1';
+const inFlight = new Set();
+
+async function loadSyncedIds() {
+  try {
+    const raw = await AsyncStorage.getItem(SYNCED_ORDERS_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function markSynced(orderId) {
+  const synced = await loadSyncedIds();
+  synced.add(String(orderId));
+  await AsyncStorage.setItem(SYNCED_ORDERS_KEY, JSON.stringify([...synced]));
+}
 
 export async function syncOrderToCloud(order) {
   if (!order?.id || !POS_SYNC_KEY) return false;
+  const orderId = String(order.id);
+  const synced = await loadSyncedIds();
+  if (synced.has(orderId)) return true;
+  if (inFlight.has(orderId)) return false;
+
+  inFlight.add(orderId);
   try {
     const response = await fetch(SYNC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-pos-key': POS_SYNC_KEY },
       body: JSON.stringify(order),
     });
-    return response.ok;
+    if (!response.ok) return false;
+    await markSynced(orderId);
+    return true;
   } catch {
     return false;
+  } finally {
+    inFlight.delete(orderId);
   }
 }
 
 export async function syncOrdersToCloud(orders = []) {
+  const list = Array.isArray(orders) ? orders : [];
+  const syncedIds = await loadSyncedIds();
+  const pending = list.filter((order) => order?.id && !syncedIds.has(String(order.id)));
   let synced = 0;
-  for (const order of Array.isArray(orders) ? orders : []) {
+
+  for (const order of pending) {
     if (await syncOrderToCloud(order)) synced += 1;
   }
-  return { synced, total: Array.isArray(orders) ? orders.length : 0 };
+
+  return { synced, pending: pending.length, total: list.length };
 }

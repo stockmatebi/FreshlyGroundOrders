@@ -30,8 +30,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest already includes the Android SDK. Avoid setup-android@v3 here:
+      # it currently requests the retired SDK package 'tools' and fails before build.
 
       - name: Install dependencies
         run: npm install

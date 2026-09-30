@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SYNC_URL = 'https://iymwzyxlvtyidebxdzyw.supabase.co/functions/v1/sync-sale';
 const POS_SYNC_KEY = process.env.EXPO_PUBLIC_POS_SYNC_KEY || '';
 const SYNCED_ORDERS_KEY = 'FGE_CLOUD_SYNCED_ORDER_IDS_V1';
+const BASELINE_KEY = 'FGE_CLOUD_SYNC_BASELINE_V1';
 
 const inFlight = new Set();
 let syncedIdsCache = null;
@@ -34,13 +35,36 @@ async function markSynced(orderId) {
   const synced = await loadSyncedIds();
   synced.add(String(orderId));
 
-  // Serialize writes so concurrent successful requests cannot overwrite
-  // each other's synced IDs with stale AsyncStorage snapshots.
   persistQueue = persistQueue
     .catch(() => {})
     .then(() => AsyncStorage.setItem(SYNCED_ORDERS_KEY, JSON.stringify([...synced])));
 
   await persistQueue;
+}
+
+async function initializeExistingOrdersAsSynced(orders) {
+  const baseline = await AsyncStorage.getItem(BASELINE_KEY);
+  if (baseline === 'done') return false;
+
+  const synced = await loadSyncedIds();
+  const list = Array.isArray(orders) ? orders : [];
+
+  // Existing sales are already present in the Supabase reporting database.
+  // Mark the history already on the tablet as synced so an app upgrade does
+  // not re-upload the entire historical backlog and recreate the quota spike.
+  for (const order of list) {
+    if (order?.id) synced.add(String(order.id));
+  }
+
+  persistQueue = persistQueue
+    .catch(() => {})
+    .then(async () => {
+      await AsyncStorage.setItem(SYNCED_ORDERS_KEY, JSON.stringify([...synced]));
+      await AsyncStorage.setItem(BASELINE_KEY, 'done');
+    });
+
+  await persistQueue;
+  return true;
 }
 
 export async function syncOrderToCloud(order) {
@@ -76,6 +100,14 @@ export async function syncOrderToCloud(order) {
 
 async function runBatchSync(orders = []) {
   const list = Array.isArray(orders) ? orders : [];
+
+  // First launch after this sync change: establish a baseline instead of
+  // sending the entire historical sales archive again.
+  const didBaseline = await initializeExistingOrdersAsSynced(list);
+  if (didBaseline) {
+    return { synced: 0, pending: 0, total: list.length, baseline: true };
+  }
+
   const syncedIds = await loadSyncedIds();
   const pending = list.filter(
     (order) => order?.id && !syncedIds.has(String(order.id))
@@ -86,13 +118,10 @@ async function runBatchSync(orders = []) {
     if (await syncOrderToCloud(order)) synced += 1;
   }
 
-  return { synced, pending: pending.length, total: list.length };
+  return { synced, pending: pending.length, total: list.length, baseline: false };
 }
 
 export async function syncOrdersToCloud(orders = []) {
-  // Only one complete backlog sync may run at a time. The previous code
-  // started another full pass every 60 seconds even if the prior pass
-  // was still running, which caused duplicate Edge Function invocations.
   if (batchSyncPromise) return batchSyncPromise;
 
   batchSyncPromise = runBatchSync(orders);

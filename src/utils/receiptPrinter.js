@@ -3,6 +3,13 @@ import { receiptLogoBase64 } from '../assets/receiptLogo';
 
 let cachedPrinterModule;
 let connectedPrinterKey = null;
+let printerQueue = Promise.resolve();
+function withPrinterLock(task) {
+  const run = printerQueue.then(task, task);
+  printerQueue = run.catch(() => {});
+  return run;
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getPrinterModule() {
   if (cachedPrinterModule !== undefined) return cachedPrinterModule;
@@ -76,16 +83,30 @@ async function connect(printer) {
   await USBPrinter.init(); await USBPrinter.connectPrinter(vendorId, productId); connectedPrinterKey = `${vendorId}:${productId}`; return USBPrinter;
 }
 export async function autoConnectSavedPrinter(printer) {
-  if (Platform.OS !== 'android' || !printer) return false;
-  const vendorId = Number(printer?.vendorId), productId = Number(printer?.productId); if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return false;
-  const key = `${vendorId}:${productId}`;
-  try {
-    const devices = await listUsbPrinters();
-    const attached = devices.some((device) => device.vendorId === vendorId && device.productId === productId);
-    if (!attached) { connectedPrinterKey = null; return false; }
-    if (connectedPrinterKey === key) return true;
-    await connect(printer); return true;
-  } catch (error) { connectedPrinterKey = null; console.warn('Automatic USB printer connection failed:', error?.message || error); return false; }
+  return withPrinterLock(async () => {
+    if (Platform.OS !== 'android' || !printer) return false;
+    const vendorId = Number(printer?.vendorId), productId = Number(printer?.productId); if (!Number.isInteger(vendorId) || !Number.isInteger(productId)) return false;
+    const key = `${vendorId}:${productId}`;
+    try {
+      const devices = await listUsbPrinters();
+      const attached = devices.some((device) => device.vendorId === vendorId && device.productId === productId);
+      if (!attached) { connectedPrinterKey = null; return false; }
+      if (connectedPrinterKey === key) return true;
+      await connect(printer); return true;
+    } catch (error) { connectedPrinterKey = null; console.warn('Automatic USB printer connection failed:', error?.message || error); return false; }
+  });
+}
+async function connectWithRetry(printer, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try { return await connect(printer); }
+    catch (error) {
+      lastError = error;
+      connectedPrinterKey = null;
+      if (attempt < attempts) await wait(700 * attempt);
+    }
+  }
+  throw lastError || new Error('Could not connect to the USB printer.');
 }
 
 async function printReceiptLogo(USBPrinter) { if (typeof USBPrinter.printImageBase64 !== 'function') return false; try { const cleanBase64 = String(receiptLogoBase64 || '').replace(/\s+/g, ''); await Promise.resolve(USBPrinter.printImageBase64(cleanBase64, { imageWidth: 320, align: 'center' })); if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n')); return true; } catch (error) { console.warn('Receipt logo print failed:', error?.message || error); return false; } }
@@ -101,8 +122,21 @@ async function printLoyaltyRewardSlip(USBPrinter, reward, receipt) {
   if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(lines.join('\n') + '\n')); if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: true, tailingLine: true, encoding: 'UTF-8' }));
 }
 export async function printOrderSlip(order, settings, options = {}) {
-  const printer = settings?.printer, receipt = settings?.receipt || {}; if (!printer) { Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.'); return { printed: false, reason: 'No printer selected' }; }
-  try { const USBPrinter = await connect(printer); await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' }); await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' }); if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt); return { printed: true, copies: order.loyaltyReward ? 3 : 2 }; }
-  catch (error) { connectedPrinterKey = null; console.warn('USB print failed:', error?.message || error); Alert.alert('USB print failed', error?.message || 'Could not print. Check the USB cable, printer power and Android USB permission.'); return { printed: false, reason: error?.message || 'Unknown printer error' }; }
+  return withPrinterLock(async () => {
+    const printer = settings?.printer, receipt = settings?.receipt || {};
+    if (!printer) { Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.'); return { printed: false, reason: 'No printer selected' }; }
+    try {
+      const USBPrinter = await connectWithRetry(printer, 3);
+      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
+      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
+      if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
+      return { printed: true, copies: order.loyaltyReward ? 3 : 2 };
+    } catch (error) {
+      connectedPrinterKey = null;
+      console.warn('USB print failed:', error?.message || error);
+      Alert.alert('Order saved, but printing failed', `Order #${order.number} was saved. The printer connection was retried 3 times. You can reprint it from Orders / Sales. ${error?.message || 'Check the USB cable, printer power and Android USB permission.'}`);
+      return { printed: false, reason: error?.message || 'Unknown printer error' };
+    }
+  });
 }
 export async function printTestSlip(settings) { if (!settings?.printer) { Alert.alert('USB printer not selected', 'Detect and select the POS-8360 first.'); return { printed: false, reason: 'No printer selected' }; } const now = new Date(); const order = { number: 'TEST', createdAt: now.toISOString(), createdAtText: now.toLocaleString('en-ZA'), orderType: 'USB TEST', customerName: '', tableNumber: '', orderNote: 'POS-8360 USB printer test', items: [{ id: 'test', name: 'Cappuccino', qty: 1, unitPrice: 32, selectedModifiers: [], note: '' }], total: 32 }; return printOrderSlip(order, settings); }

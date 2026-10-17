@@ -7,14 +7,93 @@ import { theme } from '../theme';
 export function OrdersScreen({ orders, settings, onUpdateOrder }) {
   const days = useMemo(() => groupOrdersByDay(orders), [orders]);
   const [openDay, setOpenDay] = useState(days[0]?.date || null);
+  const [printingIds, setPrintingIds] = useState([]);
   const openOrders = useMemo(() => orders.filter(o => (o.status || 'New') !== 'Done'), [orders]);
-  async function shareDay(day) { try { await shareDailySales(day.date, day.orders); } catch (error) { Alert.alert('Could not share report', error?.message || 'The daily sales report could not be generated.'); } }
-  async function setStatus(order,status){ if(onUpdateOrder) await onUpdateOrder({...order,status,updatedAt:new Date().toISOString()}); }
+
+  async function shareDay(day) {
+    try { await shareDailySales(day.date, day.orders); }
+    catch (error) { Alert.alert('Could not share report', error?.message || 'The daily sales report could not be generated.'); }
+  }
+  async function setStatus(order, status) {
+    if (onUpdateOrder) await onUpdateOrder({ ...order, status, updatedAt: new Date().toISOString() });
+  }
+  async function printFromOpenOrders(order) {
+    if (printingIds.includes(order.id)) return;
+    setPrintingIds(current => [...current, order.id]);
+    try {
+      const result = await printOrderSlip(order, settings);
+      if (result?.printed) Alert.alert('Order printed', `Order #${order.number} was sent to the printer.`);
+    } catch (error) {
+      Alert.alert('Printing failed', error?.message || 'Could not print this order. Check the USB printer connection and try again from Orders / Sales.');
+    } finally {
+      setPrintingIds(current => current.filter(id => id !== order.id));
+    }
+  }
+  async function reprintFromHistory(order) {
+    if (printingIds.includes(order.id)) return;
+    setPrintingIds(current => [...current, order.id]);
+    try {
+      const result = await printOrderSlip(order, settings, { reprint: true });
+      if (result?.printed) Alert.alert('Reprint sent', `Order #${order.number} was sent to the printer.`);
+    } catch (error) {
+      Alert.alert('Printing failed', error?.message || 'Could not print this order. Check the USB printer connection and try again.');
+    } finally {
+      setPrintingIds(current => current.filter(id => id !== order.id));
+    }
+  }
+
   return <ScrollView contentContainerStyle={styles.container}>
-    <Text style={styles.title}>Open Orders</Text><Text style={styles.subtitle}>{openOrders.length} currently open · update kitchen progress here.</Text>
-    <View style={styles.openGrid}>{openOrders.slice(0,12).map(order=><View key={order.id} style={styles.openCard}><View style={styles.row}><Text style={styles.orderNo}>#{order.number}</Text><Text style={styles.orderTotal}>{formatMoney(order.total)}</Text></View><Text style={styles.meta}>{order.orderType}{order.tableNumber?` · Table ${order.tableNumber}`:''}</Text><Text style={styles.status}>{order.status||'New'}</Text><View style={styles.statusRow}>{['New','Preparing','Done'].map(x=><TouchableOpacity key={x} onPress={()=>setStatus(order,x)} style={[styles.statusButton,(order.status||'New')===x&&styles.statusActive]}><Text style={styles.statusText}>{x}</Text></TouchableOpacity>)}</View><TouchableOpacity style={styles.reprintButton} onPress={()=>printOrderSlip(order,settings,{reprint:true})}><Text style={styles.reprintText}>REPRINT</Text></TouchableOpacity></View>)}</View>
-    <Text style={[styles.title,{marginTop:16}]}>Sales Archive</Text><Text style={styles.subtitle}>Orders grouped by trading day.</Text>
-    {days.map(day=>{const expanded=openDay===day.date;return <View key={day.date} style={styles.dayCard}><TouchableOpacity style={styles.dayHeader} onPress={()=>setOpenDay(expanded?null:day.date)}><View><Text style={styles.dayDate}>{day.date}</Text><Text style={styles.dayMeta}>{day.count} orders · Avg {formatMoney(day.average)}</Text></View><View style={styles.dayRight}><Text style={styles.dayTotal}>{formatMoney(day.total)}</Text><Text>{expanded?'▲':'▼'}</Text></View></TouchableOpacity>{expanded?<View style={styles.dayBody}><TouchableOpacity style={styles.shareButton} onPress={()=>shareDay(day)}><Text style={styles.shareText}>SHARE END-OF-DAY PDF</Text></TouchableOpacity>{day.orders.map(order=><View key={order.id} style={styles.orderCard}><View style={styles.row}><Text style={styles.orderNo}>Order #{order.number}</Text><Text style={styles.orderTotal}>{formatMoney(order.total)}</Text></View><Text style={styles.meta}>{order.createdAtText} · {order.orderType} · {order.status||'New'}</Text>{order.customerName?<Text style={styles.meta}>Customer: {order.customerName}</Text>:null}<View style={styles.itemsBox}>{(order.items||[]).map((item,index)=><View key={`${item.lineId||item.id}-${index}`} style={styles.itemLine}><Text style={styles.itemText}>{item.qty} × {item.name}</Text>{(item.selectedModifiers||[]).map(m=><Text key={m.id} style={styles.modText}>+ {m.name}</Text>)}</View>)}</View><TouchableOpacity style={styles.reprintButton} onPress={()=>printOrderSlip(order,settings,{reprint:true})}><Text style={styles.reprintText}>REPRINT SLIP</Text></TouchableOpacity></View>)}</View>:null}</View>})}
+    <Text style={styles.title}>Open Orders</Text>
+    <Text style={styles.subtitle}>{openOrders.length} currently open · print or update kitchen progress here.</Text>
+    <View style={styles.openGrid}>
+      {openOrders.slice(0, 12).map(order => <View key={order.id} style={styles.openCard}>
+        <View style={styles.row}><Text style={styles.orderNo}>#{order.number}</Text><Text style={styles.orderTotal}>{formatMoney(order.total)}</Text></View>
+        <Text style={styles.meta}>{order.orderType}{order.tableNumber ? ` · Table ${order.tableNumber}` : ''}</Text>
+        <Text style={styles.status}>{order.status || 'New'}</Text>
+        <View style={styles.statusRow}>{['New', 'Preparing', 'Done'].map(x => <TouchableOpacity key={x} onPress={() => setStatus(order, x)} style={[styles.statusButton, (order.status || 'New') === x && styles.statusActive]}><Text style={styles.statusText}>{x}</Text></TouchableOpacity>)}</View>
+        <TouchableOpacity disabled={printingIds.includes(order.id)} style={[styles.reprintButton, printingIds.includes(order.id) && styles.disabledButton]} onPress={() => printFromOpenOrders(order)}>
+          <Text style={styles.reprintText}>{printingIds.includes(order.id) ? 'PRINTING…' : 'PRINT ORDER NOW'}</Text>
+        </TouchableOpacity>
+      </View>)}
+    </View>
+    <Text style={[styles.title, { marginTop: 16 }]}>Sales Archive</Text>
+    <Text style={styles.subtitle}>Orders grouped by trading day.</Text>
+    {days.map(day => {
+      const expanded = openDay === day.date;
+      return <View key={day.date} style={styles.dayCard}>
+        <TouchableOpacity style={styles.dayHeader} onPress={() => setOpenDay(expanded ? null : day.date)}>
+          <View><Text style={styles.dayDate}>{day.date}</Text><Text style={styles.dayMeta}>{day.count} orders · Avg {formatMoney(day.average)}</Text></View>
+          <View style={styles.dayRight}><Text style={styles.dayTotal}>{formatMoney(day.total)}</Text><Text>{expanded ? '▲' : '▼'}</Text></View>
+        </TouchableOpacity>
+        {expanded ? <View style={styles.dayBody}>
+          <TouchableOpacity style={styles.shareButton} onPress={() => shareDay(day)}><Text style={styles.shareText}>SHARE END-OF-DAY PDF</Text></TouchableOpacity>
+          {day.orders.map(order => <View key={order.id} style={styles.orderCard}>
+            <View style={styles.row}><Text style={styles.orderNo}>Order #{order.number}</Text><Text style={styles.orderTotal}>{formatMoney(order.total)}</Text></View>
+            <Text style={styles.meta}>{order.createdAtText} · {order.orderType} · {order.status || 'New'}</Text>
+            {order.customerName ? <Text style={styles.meta}>Customer: {order.customerName}</Text> : null}
+            <View style={styles.itemsBox}>{(order.items || []).map((item, index) => <View key={`${item.lineId || item.id}-${index}`} style={styles.itemLine}><Text style={styles.itemText}>{item.qty} × {item.name}</Text>{(item.selectedModifiers || []).map(m => <Text key={m.id} style={styles.modText}>+ {m.name}</Text>)}</View>)}</View>
+            <TouchableOpacity disabled={printingIds.includes(order.id)} style={[styles.reprintButton, printingIds.includes(order.id) && styles.disabledButton]} onPress={() => reprintFromHistory(order)}><Text style={styles.reprintText}>{printingIds.includes(order.id) ? 'PRINTING…' : 'REPRINT SLIP'}</Text></TouchableOpacity>
+          </View>)}
+        </View> : null}
+      </View>;
+    })}
   </ScrollView>;
 }
-const c=theme.colors;const styles=StyleSheet.create({container:{padding:12,paddingBottom:30},title:{fontSize:23,fontWeight:'900',color:c.ink},subtitle:{color:c.muted,marginTop:2,marginBottom:10},openGrid:{flexDirection:'row',flexWrap:'wrap',gap:8},openCard:{backgroundColor:'#fff',borderWidth:1,borderColor:c.line,borderRadius:12,padding:10,minWidth:210,flexGrow:1,maxWidth:330},row:{flexDirection:'row',justifyContent:'space-between',gap:8},orderNo:{fontSize:17,fontWeight:'900',color:c.ink},orderTotal:{fontSize:17,fontWeight:'900',color:c.red},meta:{color:c.muted,marginTop:2},status:{fontWeight:'900',color:c.greenDark,marginTop:5},statusRow:{flexDirection:'row',gap:4,marginTop:5},statusButton:{flex:1,padding:6,borderRadius:7,backgroundColor:c.soft},statusActive:{backgroundColor:c.green},statusText:{fontSize:10,fontWeight:'900',textAlign:'center'},reprintButton:{backgroundColor:c.espresso,borderRadius:8,padding:8,marginTop:6},reprintText:{color:'#fff',fontWeight:'900',textAlign:'center'},dayCard:{backgroundColor:c.surface,borderRadius:14,marginBottom:10,borderWidth:1,borderColor:c.line,overflow:'hidden'},dayHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:12},dayDate:{fontSize:17,fontWeight:'900',color:c.greenDark},dayMeta:{color:c.muted,marginTop:2,fontWeight:'600'},dayRight:{alignItems:'flex-end'},dayTotal:{fontSize:18,fontWeight:'900',color:c.red},dayBody:{borderTopWidth:1,borderTopColor:c.line,padding:10,backgroundColor:c.bg},shareButton:{backgroundColor:c.green,borderRadius:10,padding:10,marginBottom:8},shareText:{color:'#fff',fontWeight:'900',textAlign:'center'},orderCard:{backgroundColor:'#fff',borderRadius:11,padding:10,marginBottom:8,borderWidth:1,borderColor:c.line},itemsBox:{marginTop:7,paddingTop:6,borderTopWidth:1,borderTopColor:c.soft},itemLine:{marginBottom:4},itemText:{fontWeight:'800',color:c.ink},modText:{color:c.muted,marginLeft:10}});
+const c = theme.colors;
+const styles = StyleSheet.create({
+  container: { padding: 12, paddingBottom: 30 }, title: { fontSize: 23, fontWeight: '900', color: c.ink },
+  subtitle: { color: c.muted, marginTop: 2, marginBottom: 10 }, openGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  openCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: c.line, borderRadius: 12, padding: 10, minWidth: 210, flexGrow: 1, maxWidth: 330 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 }, orderNo: { fontSize: 17, fontWeight: '900', color: c.ink },
+  orderTotal: { fontSize: 17, fontWeight: '900', color: c.red }, meta: { color: c.muted, marginTop: 2 }, status: { fontWeight: '900', color: c.greenDark, marginTop: 5 },
+  statusRow: { flexDirection: 'row', gap: 4, marginTop: 5 }, statusButton: { flex: 1, padding: 6, borderRadius: 7, backgroundColor: c.soft },
+  statusActive: { backgroundColor: c.green }, statusText: { fontSize: 10, fontWeight: '900', textAlign: 'center' },
+  reprintButton: { backgroundColor: c.espresso, borderRadius: 8, padding: 10, marginTop: 7 }, disabledButton: { opacity: 0.55 },
+  reprintText: { color: '#fff', fontWeight: '900', textAlign: 'center' }, dayCard: { backgroundColor: c.surface, borderRadius: 14, marginBottom: 10, borderWidth: 1, borderColor: c.line, overflow: 'hidden' },
+  dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12 }, dayDate: { fontSize: 17, fontWeight: '900', color: c.greenDark },
+  dayMeta: { color: c.muted, marginTop: 2, fontWeight: '600' }, dayRight: { alignItems: 'flex-end' }, dayTotal: { fontSize: 18, fontWeight: '900', color: c.red },
+  dayBody: { borderTopWidth: 1, borderTopColor: c.line, padding: 10, backgroundColor: c.bg }, shareButton: { backgroundColor: c.green, borderRadius: 10, padding: 10, marginBottom: 8 },
+  shareText: { color: '#fff', fontWeight: '900', textAlign: 'center' }, orderCard: { backgroundColor: '#fff', borderRadius: 11, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: c.line },
+  itemsBox: { marginTop: 7, paddingTop: 6, borderTopWidth: 1, borderTopColor: c.soft }, itemLine: { marginBottom: 4 },
+  itemText: { fontWeight: '800', color: c.ink }, modText: { color: c.muted, marginLeft: 10 }
+});

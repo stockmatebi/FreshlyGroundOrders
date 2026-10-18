@@ -9,7 +9,7 @@ const SYNC_PAUSE_KEY = 'FGE_CLOUD_SYNC_PAUSE_UNTIL_V1';
 // A failed cloud request must not cause every unsynced sale to be resent every
 // minute. In particular, Supabase may return HTTP 402 when the project quota
 // is exhausted. Keep orders locally and retry only after a persisted cooldown.
-const MAX_ORDERS_PER_BATCH = 10;
+const MAX_ORDERS_PER_BATCH = 5000; // One evening run can flush all newly-created orders, stopping on first failure.
 const PAUSE_402_MS = 60 * 60 * 1000; // Retry quota errors no more than hourly.
 const PAUSE_429_MS = 30 * 60 * 1000;
 const PAUSE_AUTH_MS = 6 * 60 * 60 * 1000;

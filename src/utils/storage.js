@@ -37,7 +37,10 @@ export async function exportBackupPayload(menu, orders, settings, customersArg) 
 export async function saveAutomaticBackup(menu, orders, settings, customers = []) {
   const today = new Date().toISOString().slice(0, 10);
   const current = await loadJson(STORAGE_KEYS.backup, []);
-  if (current[0]?.date === today) return;
-  const next = [{ date: today, createdAt: new Date().toISOString(), menu, orders, settings, customers }, ...current].slice(0, 14);
+  const snapshot = { date: today, createdAt: new Date().toISOString(), menu, orders, settings, customers };
+  // If an earlier app version made a daytime snapshot today, replace it with
+  // the evening snapshot rather than skipping the scheduled backup.
+  const remaining = current[0]?.date === today ? current.slice(1) : current;
+  const next = [snapshot, ...remaining].slice(0, 14);
   await saveJson(STORAGE_KEYS.backup, next);
 }

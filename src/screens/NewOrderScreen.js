@@ -142,37 +142,76 @@ export function NewOrderScreen({ menu, onSaveMenu, settings, onSaveSettings, cus
     setProgram('');
   }
 
-  async function saveOrder() {
-    if (!cart.length) return Alert.alert('Empty order', 'Add at least one item.');
-    const loyalty = selectedCustomer ? loyaltySummaryForOrder(cart, effectiveProgram) : { program: null, value: 0 };
-    const now = new Date();
-    const order = {
-      id: uid('order'),
-      number: getNextOrderNumber(now),
-      dayKey: localDateKey(now),
-      createdAt: now.toISOString(),
-      createdAtText: now.toLocaleString('en-ZA'),
-      orderType,
-      customerId: selectedCustomer?.id || null,
-      customerName: selectedCustomer ? customerName(selectedCustomer) : walkInName.trim(),
-      customerPhone: selectedCustomer?.phone || '',
-      loyaltyProgram: loyalty.program,
-      loyaltyValue: loyalty.value,
-      tableNumber: table.trim(),
-      orderNote: note.trim(),
-      items: cart,
-      total,
-    };
+  const [savingOrder, setSavingOrder] = useState(false);
 
-    const saveResult = await onOrderSaved(order);
-    if (saveResult?.loyaltyReward) order.loyaltyReward = saveResult.loyaltyReward;
-    await printOrderSlip(order, settings);
-    setCart([]);
-    setSelectedCustomerId(null);
-    setWalkInName('');
-    setProgram('');
-    setTable('');
-    setNote('');
+  async function saveOrder() {
+    if (savingOrder) return;
+    if (!cart.length) return Alert.alert('Empty order', 'Add at least one item.');
+    setSavingOrder(true);
+
+    let order = null;
+    let saved = false;
+    try {
+      const loyalty = selectedCustomer ? loyaltySummaryForOrder(cart, effectiveProgram) : { program: null, value: 0 };
+      const now = new Date();
+      order = {
+        id: uid('order'),
+        number: getNextOrderNumber(now),
+        dayKey: localDateKey(now),
+        createdAt: now.toISOString(),
+        createdAtText: now.toLocaleString('en-ZA'),
+        orderType,
+        customerId: selectedCustomer?.id || null,
+        customerName: selectedCustomer ? customerName(selectedCustomer) : walkInName.trim(),
+        customerPhone: selectedCustomer?.phone || '',
+        loyaltyProgram: loyalty.program,
+        loyaltyValue: loyalty.value,
+        tableNumber: table.trim(),
+        orderNote: note.trim(),
+        items: cart.map((item) => ({ ...item, selectedModifiers: [...(item.selectedModifiers || [])] })),
+        total,
+      };
+
+      // Save first. Do not attempt to print until local persistence has completed.
+      const saveResult = await onOrderSaved(order);
+      saved = true;
+      if (saveResult?.loyaltyReward) order.loyaltyReward = saveResult.loyaltyReward;
+
+      // The order now exists in local sales history. Clear the cart before printing
+      // so a print problem cannot accidentally create a duplicate sale on retry.
+      setCart([]);
+      setSelectedCustomerId(null);
+      setWalkInName('');
+      setProgram('');
+      setTable('');
+      setNote('');
+
+      try {
+        const printResult = await printOrderSlip(order, settings);
+        if (!printResult?.printed && !printResult?.fallbackOpened) {
+          Alert.alert(
+            'Order saved — printing needs attention',
+            `Order #${order.number} was saved in Orders / Sales, but the printer did not confirm a print. Open Orders / Sales and reprint the existing order; do not enter it again.${printResult?.reason ? `\n\nDetails: ${printResult.reason}` : ''}`
+          );
+        }
+      } catch (printError) {
+        console.error('Save succeeded but receipt printing threw an error:', printError);
+        Alert.alert(
+          'Order saved — printing failed',
+          `Order #${order.number} is saved in Orders / Sales. Reprint that existing order rather than creating a new sale.\n\nPrinting error: ${printError?.message || String(printError)}`
+        );
+      }
+    } catch (error) {
+      console.error('Save & Print Order failed before printing:', error);
+      Alert.alert(
+        saved ? 'Order saved — action incomplete' : 'Could not save order',
+        saved
+          ? `Order #${order?.number || ''} may already be in Orders / Sales. Check there before trying again.\n\nDetails: ${error?.message || String(error)}`
+          : `The order could not be confirmed as saved, so printing was not started. Your current cart has been kept.\n\nDetails: ${error?.message || String(error)}`
+      );
+    } finally {
+      setSavingOrder(false);
+    }
   }
 
   async function saveSpecial() {
@@ -236,7 +275,7 @@ export function NewOrderScreen({ menu, onSaveMenu, settings, onSaveSettings, cus
     </View>)}
     <TextInput style={styles.note} placeholder="General order note" placeholderTextColor={theme.colors.muted} value={note} onChangeText={setNote} />
     <View style={styles.totalRow}><Text style={styles.totalText}>TOTAL</Text><Text style={styles.totalText}>{formatMoney(total)}</Text></View>
-    <TouchableOpacity style={styles.printButton} onPress={saveOrder}><Text style={styles.printText}>SAVE & PRINT ORDER</Text></TouchableOpacity>
+    <TouchableOpacity style={[styles.printButton, savingOrder && { opacity: 0.65 }]} disabled={savingOrder} onPress={saveOrder}><Text style={styles.printText}>{savingOrder ? 'SAVING & PRINTING…' : 'SAVE & PRINT ORDER'}</Text></TouchableOpacity>
   </View>;
 
   return <View style={styles.root}>

@@ -15,7 +15,34 @@ export async function loadJson(key, fallback) {
   try { return JSON.parse(raw); } catch { return fallback; }
 }
 
-export async function saveJson(key, value) { await AsyncStorage.setItem(key, JSON.stringify(value)); }
+export async function saveJson(key, value) {
+  const serialized = JSON.stringify(value);
+  try {
+    await AsyncStorage.setItem(key, serialized);
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    const isFull = /SQLITE_FULL|database or disk is full|code 13/i.test(message);
+    if (!isFull || key === STORAGE_KEYS.backup) throw error;
+
+    // Backups are disposable copies; preserve the live order/customer data.
+    // Remove only the backup snapshots, then retry the original write once.
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.backup);
+    } catch {
+      // If cleanup fails, report the original write error below.
+    }
+    try {
+      await AsyncStorage.setItem(key, serialized);
+    } catch (retryError) {
+      const retryMessage = String(retryError?.message || retryError || '');
+      throw new Error(
+        /SQLITE_FULL|database or disk is full|code 13/i.test(retryMessage)
+          ? 'The app database is full. Automatic backup copies were cleared, but the data write still failed. Export a backup and contact support before clearing app data.'
+          : retryMessage
+      );
+    }
+  }
+}
 
 export function normalizePhone(value = '') { return String(value).replace(/[^0-9+]/g, '').trim(); }
 
@@ -41,6 +68,6 @@ export async function saveAutomaticBackup(menu, orders, settings, customers = []
   // If an earlier app version made a daytime snapshot today, replace it with
   // the evening snapshot rather than skipping the scheduled backup.
   const remaining = current[0]?.date === today ? current.slice(1) : current;
-  const next = [snapshot, ...remaining].slice(0, 14);
+  const next = [snapshot, ...remaining].slice(0, 3);
   await saveJson(STORAGE_KEYS.backup, next);
 }

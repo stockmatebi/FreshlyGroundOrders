@@ -115,10 +115,37 @@ async function connectWithRetry(printer, attempts = 3) {
 
 async function printReceiptLogo(USBPrinter) { if (typeof USBPrinter.printImageBase64 !== 'function') return false; try { const cleanBase64 = String(receiptLogoBase64 || '').replace(/\s+/g, ''); await Promise.resolve(USBPrinter.printImageBase64(cleanBase64, { imageWidth: 320, align: 'center' })); if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText('\n')); return true; } catch (error) { console.warn('Receipt logo print failed:', error?.message || error); return false; } }
 async function printSingleCopy(USBPrinter, order, receipt, options = {}) {
-  if (receipt.showLogo !== false) await printReceiptLogo(USBPrinter); const text = buildSlipText(order, receipt, options);
-  if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(text)); else if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill(text, { cut: false, tailingLine: false, encoding: 'UTF-8' })); else throw new Error('USB print function is unavailable in this build.');
-  if (receipt.showBarcode !== false && typeof USBPrinter.printText === 'function') { const { prefix } = barcodeValue(order, receipt); await Promise.resolve(USBPrinter.printText(center(bold('IQ RETAIL')) + '\n')); await Promise.resolve(USBPrinter.printText(buildIqRetailCode128(prefix))); }
-  if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: receipt.autoCut !== false, tailingLine: true, encoding: 'UTF-8' }));
+  // Send a single receipt payload through the native USB library. Its
+  // printText/printBill methods return void; native errors arrive via onError.
+  let text = buildSlipText(order, receipt, options);
+  if (receipt.showBarcode !== false) {
+    const { prefix } = barcodeValue(order, receipt);
+    text += center(bold('IQ RETAIL')) + '\n' + buildIqRetailCode128(prefix) + '\n';
+  }
+  if (typeof USBPrinter.printBill !== 'function') {
+    throw new Error('USB printBill function is unavailable in this build.');
+  }
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error instanceof Error ? error : new Error(String(error)));
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(), 1500);
+    try {
+      USBPrinter.printBill(text, {
+        cut: receipt.autoCut !== false,
+        tailingLine: true,
+        encoding: 'UTF-8',
+        onError: (error) => finish(error),
+      });
+    } catch (error) {
+      finish(error);
+    }
+  });
 }
 async function printLoyaltyRewardSlip(USBPrinter, reward, receipt) {
   if (!reward) return; if (receipt.showLogo !== false) await printReceiptLogo(USBPrinter);
@@ -151,43 +178,32 @@ function buildLocalPrintHtml(order, receipt = {}, options = {}) {
 
 export async function printOrderSlip(order, settings, options = {}) {
   return withPrinterLock(async () => {
-    const printer = settings?.printer, receipt = settings?.receipt || {};
-    let usbError = null;
-
-    // Try the selected USB printer first. A successful connection does not mean
-    // that the receipt write succeeded, so the fallback also covers print errors.
-    if (printer) {
-      try {
-        const USBPrinter = await connectWithRetry(printer, 3);
-        await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
-        await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
-        if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
-        return { printed: true, method: 'usb', copies: order.loyaltyReward ? 3 : 2 };
-      } catch (error) {
-        usbError = error;
-        connectedPrinterKey = null;
-        console.warn('USB printing failed; trying Android local print dialog:', error?.message || error);
-      }
-    } else {
-      usbError = new Error('No USB printer is selected in Settings.');
+    const printer = settings?.printer;
+    const receipt = settings?.receipt || {};
+    if (Platform.OS !== 'android') {
+      Alert.alert('USB printing unavailable', 'Direct USB thermal printing is supported on the Android tablet.');
+      return { printed: false, reason: 'Unsupported platform' };
+    }
+    if (!printer) {
+      Alert.alert('USB printer not selected', 'Open Settings, detect the USB printer, and select it before printing orders.');
+      return { printed: false, reason: 'No USB printer selected' };
     }
 
-    // Local Android print dialog does not call Supabase. It opens a print
-    // preview; the user must select an available printer and tap Print.
     try {
-      await Print.printAsync({ html: buildLocalPrintHtml(order, receipt, options) });
+      const USBPrinter = await connectWithRetry(printer, 3);
+      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
+      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
+      if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
+      return { printed: true, method: 'usb', copies: order.loyaltyReward ? 3 : 2 };
+    } catch (error) {
+      connectedPrinterKey = null;
+      const message = error?.message || String(error) || 'Unknown USB printing error';
+      console.error('Direct USB order printing failed:', message);
       Alert.alert(
-        'USB printing failed — print window opened',
-        `Order #${order.number} is saved on this tablet. Select a printer in the Android print window and tap Print. If the USB printer already printed part of this order, check the receipt before printing again. USB error: ${usbError?.message || 'Unknown USB printer error'}`
+        'Order saved — USB printing failed',
+        `Order #${order.number} was saved, but the USB printer did not confirm the print. Error: ${message}. Check Settings and use Print Test Slip before retrying this order.`
       );
-      return { printed: false, fallbackOpened: true, method: 'android-local-print-service', usbError: usbError?.message || 'Unknown USB printer error' };
-    } catch (fallbackError) {
-      console.warn('Android print fallback failed:', fallbackError?.message || fallbackError);
-      Alert.alert(
-        'Order saved, but printing failed',
-        `Order #${order.number} is saved on this tablet. USB error: ${usbError?.message || 'No USB printer selected'}. Android print window error: ${fallbackError?.message || 'Print service unavailable'}. Reconnect the USB printer or enable an Android print service.`
-      );
-      return { printed: false, fallbackOpened: false, reason: fallbackError?.message || usbError?.message || 'Unknown printer error', usbError: usbError?.message };
+      return { printed: false, fallbackOpened: false, reason: message, usbError: message };
     }
   });
 }

@@ -91,7 +91,10 @@ export async function autoConnectSavedPrinter(printer) {
       const devices = await listUsbPrinters();
       const attached = devices.some((device) => device.vendorId === vendorId && device.productId === productId);
       if (!attached) { connectedPrinterKey = null; return false; }
-      if (connectedPrinterKey === key) return true;
+      // Android can silently drop the native USB connection after charging,
+      // sleep, or a physical reconnect while the JS cache still has the old key.
+      // Reconnect to the saved numeric vendor/product pair whenever the device
+      // is attached so the user does not need Detect USB Printer again.
       await connect(printer); return true;
     } catch (error) { connectedPrinterKey = null; console.warn('Automatic USB printer connection failed:', error?.message || error); return false; }
   });

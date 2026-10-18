@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { defaultMenu, normalizeMenu } from './src/data/menu';
@@ -49,7 +49,7 @@ function AppShell(){
   const timer=setInterval(runEveningSync,60000);
   return()=>clearInterval(timer);
  },[ready,orders]);
- useEffect(()=>{if(!ready||!settings.printer)return;let active=true,busy=false;const check=async()=>{if(busy)return;busy=true;try{const ok=await autoConnectSavedPrinter(settings.printer);if(active)setUsbConnected(ok)}finally{busy=false}};check();const timer=setInterval(check,3000);return()=>{active=false;clearInterval(timer)}},[ready,settings.printer?.vendorId,settings.printer?.productId]);
+ useEffect(()=>{if(!ready||!settings.printer)return;let active=true,busy=false;const check=async()=>{if(busy)return;busy=true;try{const ok=await autoConnectSavedPrinter(settings.printer);if(active)setUsbConnected(ok)}finally{busy=false}};check();const timer=setInterval(check,15000);const sub=AppState.addEventListener('change',(state)=>{if(state==='active')check()});return()=>{active=false;clearInterval(timer);sub.remove()}},[ready,settings.printer?.vendorId,settings.printer?.productId]);
  async function loadData(){try{const nextMenu=normalizeMenu(await loadJson(STORAGE_KEYS.menu,defaultMenu));const nextOrders=await loadJson(STORAGE_KEYS.orders,[]);const nextSettings=mergeSettings(await loadJson(STORAGE_KEYS.settings,defaultSettings));let nextCustomers=await loadJson(STORAGE_KEYS.customers,null);if(!Array.isArray(nextCustomers)){nextCustomers=migrateLoyaltyToCustomers(await loadJson(STORAGE_KEYS.loyalty,{}));await saveJson(STORAGE_KEYS.customers,nextCustomers)}setMenu(nextMenu);setOrders(Array.isArray(nextOrders)?nextOrders:[]);setSettings(nextSettings);setCustomers(nextCustomers);await saveAutomaticBackup(nextMenu,Array.isArray(nextOrders)?nextOrders:[],nextSettings,nextCustomers);// Cloud sales sync is intentionally deferred to the evening-only schedule.}catch(e){Alert.alert('Load error','Saved data could not be loaded.')}finally{setReady(true)}}
  async function saveMenu(v){const n=normalizeMenu(v);setMenu(n);await saveJson(STORAGE_KEYS.menu,n)} async function saveSettings(v){const n=mergeSettings(v);setSettings(n);await saveJson(STORAGE_KEYS.settings,n)} async function saveCustomers(v){const n=Array.isArray(v)?v:[];setCustomers(n);await saveJson(STORAGE_KEYS.customers,n)}
  async function updateOrder(order){const n=orders.map(o=>o.id===order.id?order:o);setOrders(n);await saveJson(STORAGE_KEYS.orders,n);}

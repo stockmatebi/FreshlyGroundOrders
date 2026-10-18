@@ -152,27 +152,42 @@ function buildLocalPrintHtml(order, receipt = {}, options = {}) {
 export async function printOrderSlip(order, settings, options = {}) {
   return withPrinterLock(async () => {
     const printer = settings?.printer, receipt = settings?.receipt || {};
-    if (!printer) { Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.'); return { printed: false, reason: 'No printer selected' }; }
-    try {
-      let USBPrinter;
+    let usbError = null;
+
+    // Try the selected USB printer first. A successful connection does not mean
+    // that the receipt write succeeded, so the fallback also covers print errors.
+    if (printer) {
       try {
-        USBPrinter = await connectWithRetry(printer, 3);
-      } catch (connectionError) {
-        // If USB connection fails, use Android's native print service locally.
-        // This does not call Supabase and still allows a nearby printer selected
-        // in the Android print dialog to print the saved order.
-        await Print.printAsync({ html: buildLocalPrintHtml(order, receipt, options) });
-        return { printed: true, method: 'android-local-print-service', copies: 1 };
+        const USBPrinter = await connectWithRetry(printer, 3);
+        await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
+        await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
+        if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
+        return { printed: true, method: 'usb', copies: order.loyaltyReward ? 3 : 2 };
+      } catch (error) {
+        usbError = error;
+        connectedPrinterKey = null;
+        console.warn('USB printing failed; trying Android local print dialog:', error?.message || error);
       }
-      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
-      await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
-      if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
-      return { printed: true, copies: order.loyaltyReward ? 3 : 2 };
-    } catch (error) {
-      connectedPrinterKey = null;
-      console.warn('USB print failed:', error?.message || error);
-      Alert.alert('Order saved, but printing failed', `Order #${order.number} was saved. The printer connection was retried 3 times. You can reprint it from Orders / Sales. ${error?.message || 'Check the USB cable, printer power and Android USB permission.'}`);
-      return { printed: false, reason: error?.message || 'Unknown printer error' };
+    } else {
+      usbError = new Error('No USB printer is selected in Settings.');
+    }
+
+    // Local Android print dialog does not call Supabase. It opens a print
+    // preview; the user must select an available printer and tap Print.
+    try {
+      await Print.printAsync({ html: buildLocalPrintHtml(order, receipt, options) });
+      Alert.alert(
+        'USB printing failed — print window opened',
+        `Order #${order.number} is saved on this tablet. Select a printer in the Android print window and tap Print. If the USB printer already printed part of this order, check the receipt before printing again. USB error: ${usbError?.message || 'Unknown USB printer error'}`
+      );
+      return { printed: false, fallbackOpened: true, method: 'android-local-print-service', usbError: usbError?.message || 'Unknown USB printer error' };
+    } catch (fallbackError) {
+      console.warn('Android print fallback failed:', fallbackError?.message || fallbackError);
+      Alert.alert(
+        'Order saved, but printing failed',
+        `Order #${order.number} is saved on this tablet. USB error: ${usbError?.message || 'No USB printer selected'}. Android print window error: ${fallbackError?.message || 'Print service unavailable'}. Reconnect the USB printer or enable an Android print service.`
+      );
+      return { printed: false, fallbackOpened: false, reason: fallbackError?.message || usbError?.message || 'Unknown printer error', usbError: usbError?.message };
     }
   });
 }

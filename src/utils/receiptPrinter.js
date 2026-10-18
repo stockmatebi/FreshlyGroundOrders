@@ -1,4 +1,5 @@
 import { Alert, Platform } from 'react-native';
+import * as Print from 'expo-print';
 import { receiptLogoBase64 } from '../assets/receiptLogo';
 
 let cachedPrinterModule;
@@ -124,12 +125,45 @@ async function printLoyaltyRewardSlip(USBPrinter, reward, receipt) {
   const lines = [center(large(bold('LOYALTY REWARD'))), center(bold('10 PURCHASES COMPLETED')), '', hr(), reward.customerName ? center(doubleHeight(bold(reward.customerName))) : '', center(doubleHeight(`${String(reward.program || '').toUpperCase()} REWARD`)), '', center(large(bold(`CLAIM UP TO ${formatMoney(reward.value)}`))), '', center('Present this slip when claiming your reward.'), center('One reward claim per completed loyalty cycle.'), hr(), center('FRESHLY GROUND EXPRESS'), ''].filter((line) => line !== null);
   if (typeof USBPrinter.printText === 'function') await Promise.resolve(USBPrinter.printText(lines.join('\n') + '\n')); if (typeof USBPrinter.printBill === 'function') await Promise.resolve(USBPrinter.printBill('\n', { cut: true, tailingLine: true, encoding: 'UTF-8' }));
 }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function buildLocalPrintHtml(order, receipt = {}, options = {}) {
+  const itemRows = (order.items || []).map((item) => {
+    const qty = Number(item.qty || 0);
+    const unit = Number(item.unitPrice ?? item.price ?? 0);
+    const mods = (item.selectedModifiers || []).map((mod) => '<div class="modifier">+ ' + escapeHtml(simplifyChoiceName(mod.name)) + (receipt.showPrices === false || !Number(mod.price || 0) ? '' : ' +' + formatMoney(qty * Number(mod.price || 0))) + '</div>').join('');
+    return '<section><div class="item"><span>' + qty + ' × ' + escapeHtml(item.name) + '</span><strong>' + (receipt.showPrices === false ? '' : formatMoney(qty * unit)) + '</strong></div>' + mods + (receipt.showNotes !== false && item.note ? '<div class="note">NOTE: ' + escapeHtml(item.note) + '</div>' : '') + '</section>';
+  }).join('');
+  const header = '<h1>' + escapeHtml(receipt.businessName || 'FRESHLY GROUND EXPRESS') + '</h1>' +
+    (receipt.headerLine1 ? '<div>' + escapeHtml(receipt.headerLine1) + '</div>' : '') +
+    (receipt.headerLine2 ? '<div>' + escapeHtml(receipt.headerLine2) + '</div>' : '') +
+    (receipt.phone ? '<div>' + escapeHtml(receipt.phone) + '</div>' : '');
+  return '<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;font-size:12pt;color:#111;margin:12mm}h1{text-align:center;font-size:20pt;margin:0 0 8px}h2{text-align:center;font-size:18pt;margin:10px 0} .center{text-align:center}.rule{border-top:1px dashed #333;margin:10px 0}.item{display:flex;justify-content:space-between;gap:10px;font-weight:bold;margin:8px 0}.modifier{padding-left:12px}.note{font-weight:bold;padding-left:12px}.total{text-align:right;font-size:18pt;font-weight:bold;margin:12px 0}.copy{page-break-after:always}</style></head><body>' +
+    '<div class="copy">' + header + '<div class="rule"></div><h2>ORDER #' + escapeHtml(order.number) + '</h2><div class="center">' + escapeHtml(order.createdAtText || '') + '</div>' +
+    '<div class="center"><strong>' + escapeHtml(order.orderType || '') + '</strong></div>' +
+    (receipt.showCustomer !== false && order.customerName ? '<div>Customer: ' + escapeHtml(order.customerName) + '</div>' : '') +
+    (receipt.showTable !== false && order.tableNumber ? '<div>Table: ' + escapeHtml(order.tableNumber) + '</div>' : '') +
+    '<div class="rule"></div>' + itemRows + (receipt.showNotes !== false && order.orderNote ? '<p><strong>ORDER NOTE: ' + escapeHtml(order.orderNote) + '</strong></p>' : '') +
+    '<div class="rule"></div>' + (receipt.showTotal === false ? '' : '<div class="total">TOTAL: ' + formatMoney(order.total) + '</div>') +
+    (receipt.footer ? '<div class="center">' + escapeHtml(receipt.footer) + '</div>' : '') + '<div class="center">KITCHEN / CUSTOMER COPY</div></div></body></html>';
+}
+
 export async function printOrderSlip(order, settings, options = {}) {
   return withPrinterLock(async () => {
     const printer = settings?.printer, receipt = settings?.receipt || {};
     if (!printer) { Alert.alert('USB printer not selected', 'Connect the POS-8360 by USB, tap Detect USB Printer, then select it before printing.'); return { printed: false, reason: 'No printer selected' }; }
     try {
-      const USBPrinter = await connectWithRetry(printer, 3);
+      let USBPrinter;
+      try {
+        USBPrinter = await connectWithRetry(printer, 3);
+      } catch (connectionError) {
+        // If USB connection fails, use Android's native print service locally.
+        // This does not call Supabase and still allows a nearby printer selected
+        // in the Android print dialog to print the saved order.
+        await Print.printAsync({ html: buildLocalPrintHtml(order, receipt, options) });
+        return { printed: true, method: 'android-local-print-service', copies: 1 };
+      }
       await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'KITCHEN COPY' });
       await printSingleCopy(USBPrinter, order, receipt, { ...options, copyLabel: 'CUSTOMER COPY' });
       if (order.loyaltyReward) await printLoyaltyRewardSlip(USBPrinter, order.loyaltyReward, receipt);
